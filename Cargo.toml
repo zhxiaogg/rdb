@@ -1,0 +1,6 @@
+[package]
+name = "rdb"
+version = "0.1.0"
+authors = ["zhxiaog <zhxiaog@outlook.com>"]
+
+[dependencies]
