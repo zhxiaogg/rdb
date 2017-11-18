@@ -9,6 +9,9 @@ use std::ops::IndexMut;
 extern crate byteorder;
 use byteorder::{BigEndian, ByteOrder};
 
+extern crate regex;
+use regex::Regex;
+
 fn main() {
     //TODO: print rdb info
     let mut table = Table::new();
@@ -99,7 +102,7 @@ impl Table {
         let bytes = Table::serialize(row);
         {
             let row_index = self.num_rows;
-            let (mut page, mut pos) = self.row_slot_for_write(row_index);
+            let (page, mut pos) = self.row_slot_for_write(row_index);
             for b in bytes {
                 page[pos] = b;
                 pos+=1;
@@ -108,19 +111,19 @@ impl Table {
         self.num_rows += 1;
     }
 
-    fn row_slot_for_write(self:&mut Table, rowIndex:usize) -> (&mut Page, usize) {
+    fn row_slot_for_write(self:&mut Table, row_index:usize) -> (&mut Page, usize) {
         let rows_per_page = PAGE_SIZE / ROW_SIZE;
-        let mut page_num = rowIndex / rows_per_page;
+        let page_num = row_index / rows_per_page;
         if self.pages.len() < page_num + 1 {
             self.pages.push(vec![0; PAGE_SIZE]);
         }
-        return (&mut self.pages[page_num], ROW_SIZE * (rowIndex % rows_per_page));
+        return (&mut self.pages[page_num], ROW_SIZE * (row_index % rows_per_page));
     }
 
-    fn row_slot_for_read(self: &Table, rowIndex:usize) -> (&Page, usize) {
+    fn row_slot_for_read(self: &Table, row_index:usize) -> (&Page, usize) {
         let rows_per_page = PAGE_SIZE / ROW_SIZE;
-        let mut page_num = rowIndex / rows_per_page;
-        return (&self.pages[page_num], ROW_SIZE * (rowIndex % rows_per_page));
+        let page_num = row_index / rows_per_page;
+        return (&self.pages[page_num], ROW_SIZE * (row_index % rows_per_page));
     }
 
     fn serialize(row:&Row) -> Vec<u8> {
@@ -175,12 +178,20 @@ fn prepare_statement(input_buffer:&str, statement:&mut Statement) -> PrepareResu
         statement.kind = StatementType::SELECT;
         PrepareResult::SUCCESS
     } else if input_buffer.starts_with("insert") {
-        let id: i32;
-        let mut username = String::new();
-        let mut email = String::new();
-        statement.kind = StatementType::INSERT;
-        statement.row_to_insert = Some(Row {id: 1, username: String::from("username"), email: String::from("email")});
-        PrepareResult::SUCCESS
+        let re = Regex::new(r"^insert[\s\t]+(\d+)[\s\t]+(\w+)[\s\t]+([\w@\.\d]+)[\s\t]*$").unwrap();
+        if !re.is_match(input_buffer) {
+            PrepareResult::SYNTAX_ERROR
+        } else {
+            let captures = re.captures(input_buffer).unwrap();
+            let digit = captures.get(1).unwrap().as_str();
+            println!("{:?}", digit);
+            let id = i32::from_str_radix(digit, 10).unwrap();
+            let username = String::from(captures.get(2).unwrap().as_str());
+            let email = String::from(captures.get(3).unwrap().as_str());
+            statement.kind = StatementType::INSERT;
+            statement.row_to_insert = Some(Row {id: id, username: username, email: email});
+            PrepareResult::SUCCESS
+        }
     } else {
         PrepareResult::UNRECOGNIZED
     }
