@@ -1,11 +1,8 @@
 extern crate byteorder;
-extern crate regex;
 
 use std::io;
 use std::process;
 use std::io::Write;
-
-use regex::Regex;
 
 mod table;
 use table::{Table, Row};
