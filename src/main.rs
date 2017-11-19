@@ -22,7 +22,7 @@ fn main() {
 
         if input_buffer.starts_with(".") {
             match do_meta_command(&input_buffer) {
-                MetaCommandResult::SUCCESS => {},
+                MetaCommandResult::Success => {},
                 MetaCommandResult::UNRECOGNIZED => {
                     println!("Unrecognized command: {}", input_buffer.trim());
                 }
@@ -32,22 +32,24 @@ fn main() {
 
         let mut statement = Statement { kind : StatementType::SELECT, row_to_insert: None };
         match prepare_statement(&input_buffer, &mut statement) {
-            PrepareResult::SUCCESS => {
-                execute_statement(&statement, &mut table);
-                println!("Executed!");
+            PrepareResult::Success => {
+                match execute_statement(&statement, &mut table) {
+                    ExecuteResult::Success => println!("Executed."),
+                    ExecuteResult::TableFull => println!("Error: Table full.")
+                }
             },
             PrepareResult::UNRECOGNIZED => {
                 println!("Unrecognized command: {}", input_buffer.trim());
             },
-            PrepareResult::SYNTAX_ERROR => {
-                println!("Illegal syntax command: {}", input_buffer.trim());
+            PrepareResult::SyntaxError(message) => {
+                println!("{}", &message);
             }
         }
     }
 }
 
 enum MetaCommandResult {
-    SUCCESS,
+    Success,
     UNRECOGNIZED
 }
 
@@ -70,51 +72,69 @@ struct Statement {
 }
 
 enum PrepareResult {
-    SUCCESS,
+    Success,
     UNRECOGNIZED,
-    SYNTAX_ERROR
+    SyntaxError(String)
 }
+
+enum ExecuteResult {
+    Success,
+    TableFull
+}
+
 
 fn prepare_statement(input_buffer:&str, statement:&mut Statement) -> PrepareResult {
     if input_buffer.starts_with("select") {
         statement.kind = StatementType::SELECT;
-        PrepareResult::SUCCESS
+        PrepareResult::Success
     } else if input_buffer.starts_with("insert") {
-        let re = Regex::new(r"^insert[\s\t]+(\d+)[\s\t]+(\w+)[\s\t]+([\w@\.\d]+)[\s\t]*$").unwrap();
-        if !re.is_match(input_buffer) {
-            PrepareResult::SYNTAX_ERROR
+
+        let parts:Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
+        if parts.len() != 4 {
+            PrepareResult::SyntaxError(input_buffer.to_owned())
         } else {
-            let captures = re.captures(input_buffer).unwrap();
-            let id = i32::from_str_radix(captures.get(1).unwrap().as_str(), 10).unwrap();
-            let username = String::from(captures.get(2).unwrap().as_str());
-            let email = String::from(captures.get(3).unwrap().as_str());
+            let id = i32::from_str_radix(parts[1], 10).unwrap();
+            if id < 0 {
+                return PrepareResult::SyntaxError("ID must be positive.".to_owned())
+            }
+            let username = String::from(parts[2]);
+            let email = String::from(parts[3]);
+            if username.len() > 32 || email.len() > 256 {
+                return PrepareResult::SyntaxError("String is too long.".to_owned())
+            }
             statement.kind = StatementType::INSERT;
             statement.row_to_insert = Some(Row {id: id, username: username, email: email});
-            PrepareResult::SUCCESS
+            PrepareResult::Success
         }
     } else {
         PrepareResult::UNRECOGNIZED
     }
 }
 
-fn execute_statement(statement:&Statement, table: &mut Table) {
+fn execute_statement(statement:&Statement, table: &mut Table) -> ExecuteResult {
     match statement.kind {
         StatementType::SELECT => {
             for i in 0..table.num_rows {
                 let row = table.get_row(i);
-                println!("{}\t{}\t{}\t", row.id, &row.username, &row.email);
+                println!("({}, {}, {})", row.id, &row.username, &row.email);
             }
+            ExecuteResult::Success
         },
         StatementType::INSERT => {
-            if let Some(r) = statement.row_to_insert.as_ref() {
+            if table.num_rows >= table.max_rows() {
+                ExecuteResult::TableFull
+            } else if let Some(r) = statement.row_to_insert.as_ref() {
                 table.insert(r);
+                ExecuteResult::Success
+            } else {
+                ExecuteResult::Success
             }
         }
     }
 }
 
 fn print_prompt() {
-    print!("rdb>");
+    print!("rdb > ");
     io::stdout().flush().unwrap();
 }
 

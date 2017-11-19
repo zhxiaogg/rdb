@@ -23,6 +23,10 @@ impl Table {
         return Table {pages: Vec::with_capacity(MAX_PAGE_PER_TABLE), num_rows: 0};
     }
 
+    pub fn max_rows(self:&Table) -> usize {
+        return PAGE_SIZE / ROW_SIZE * MAX_PAGE_PER_TABLE;
+    }
+
     pub fn insert(self:&mut Table, row:&Row) {
         let bytes = Table::serialize(row);
         {
@@ -51,7 +55,7 @@ impl Table {
     fn row_slot_for_write(self:&mut Table, row_index:usize) -> (&mut Page, usize) {
         let rows_per_page = PAGE_SIZE / ROW_SIZE;
         let page_num = row_index / rows_per_page;
-        if self.pages.len() < page_num + 1 {
+        while self.pages.len() < page_num + 1 {
             self.pages.push(vec![0; PAGE_SIZE]);
         }
         return (&mut self.pages[page_num], ROW_SIZE * (row_index % rows_per_page));
@@ -89,11 +93,11 @@ impl Table {
 
     fn read_string(buf:&Vec<u8>, pos:usize, length:usize) -> String {
         let mut end = pos;
-        while ((end - pos + 1) < length) && (buf[end] != 0)  {
+        while ((end - pos) < length) && (buf[end] != 0)  {
             end+=1;
         }
-        let mut bytes = vec![0;end - pos + 1];
-        bytes.clone_from_slice(buf.index(Range{start: pos, end: end+1}));
+        let mut bytes = vec![0;end - pos];
+        bytes.clone_from_slice(buf.index(Range{start: pos, end: end}));
         return String::from_utf8(bytes).unwrap();
     }
 }
