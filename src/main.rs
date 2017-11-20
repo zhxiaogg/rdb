@@ -9,7 +9,7 @@ use table::{Table, Row};
 
 fn main() {
     //TODO: print rdb info
-    let mut table = Table::new();
+    let mut table = Table::new("");
 
     let mut input_buffer = String::new();
     loop {
