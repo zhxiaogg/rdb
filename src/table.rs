@@ -6,6 +6,7 @@ use std::io::{Seek, SeekFrom, Read, Write};
 const PAGE_SIZE:usize = 4096;
 const MAX_PAGE_PER_TABLE:usize = 100;
 const ROW_SIZE:usize = 4 + 32 + 256;
+const ROWS_PER_PAGE:usize = PAGE_SIZE / ROW_SIZE;
 
 pub struct Row {
     pub id: i32,
@@ -72,12 +73,19 @@ pub struct Table {
 impl Table {
     pub fn new(file:&str) -> Table {
         let pager = Pager::new(file);
-        let num_rows = if pager.num_pages == 0 {0} else {1};
+        let num_rows = if pager.num_pages == 0 {
+            0
+        } else {
+            // this is a bug, the last page will lost if its rows length > 1
+            (pager.num_pages - 1) * ROWS_PER_PAGE + 1
+        };
         return Table {pager: pager, num_rows: num_rows};
     }
 
     pub fn close(self: &mut Table) {
-        self.pager.close();
+        for page_index in 0..self.pager.num_pages {
+            self.pager.flush(page_index);
+        }
     }
 
     pub fn max_rows(self:&Table) -> usize {
@@ -131,12 +139,6 @@ impl Pager {
         let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
         let pages = vec![None; MAX_PAGE_PER_TABLE];
         Pager {file: file, pages: pages, num_pages: num_pages}
-    }
-
-    fn close(self: &mut Pager) {
-        for page_index in 0..self.num_pages {
-            self.flush(page_index);
-        }
     }
 
     fn flush(self: &mut Pager, page_index: usize) {

@@ -9,13 +9,14 @@ mod table;
 use table::{Table, Row};
 
 fn main() {
-    let mut db_file = String::from("default.rdb");
-    if  env::args().count() > 1 {
-        db_file = env::args().nth(1).unwrap();
-    }
+    let db = if let Some(file) = env::args().nth(1) {
+        file
+    } else {
+        String::from("default.rdb")
+    };
 
     //TODO: print rdb info
-    let mut table = Table::new(db_file.as_str());
+    let mut table = Table::new(db.as_str());
 
     let mut input_buffer = String::new();
     loop {
