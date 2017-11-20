@@ -3,13 +3,20 @@ extern crate byteorder;
 use std::io;
 use std::process;
 use std::io::Write;
+use std::env;
 
 mod table;
 use table::{Table, Row};
 
 fn main() {
+    let db = if let Some(file) = env::args().nth(1) {
+        file
+    } else {
+        String::from("default.rdb")
+    };
+
     //TODO: print rdb info
-    let mut table = Table::new();
+    let mut table = Table::new(db.as_str());
 
     let mut input_buffer = String::new();
     loop {
@@ -18,8 +25,8 @@ fn main() {
         read_input(&mut input_buffer);
 
         if input_buffer.starts_with(".") {
-            match do_meta_command(&input_buffer) {
-                MetaCommandResult::Success => {},
+            match do_meta_command(&input_buffer, &mut table) {
+                MetaCommandResult::Success => {}
                 MetaCommandResult::UNRECOGNIZED => {
                     println!("Unrecognized command: {}", input_buffer.trim());
                 }
@@ -27,17 +34,20 @@ fn main() {
             continue;
         }
 
-        let mut statement = Statement { kind : StatementType::SELECT, row_to_insert: None };
+        let mut statement = Statement {
+            kind: StatementType::SELECT,
+            row_to_insert: None,
+        };
         match prepare_statement(&input_buffer, &mut statement) {
             PrepareResult::Success => {
                 match execute_statement(&statement, &mut table) {
                     ExecuteResult::Success => println!("Executed."),
-                    ExecuteResult::TableFull => println!("Error: Table full.")
+                    ExecuteResult::TableFull => println!("Error: Table full."),
                 }
-            },
+            }
             PrepareResult::UNRECOGNIZED => {
                 println!("Unrecognized command: {}", input_buffer.trim());
-            },
+            }
             PrepareResult::SyntaxError(message) => {
                 println!("{}", &message);
             }
@@ -47,11 +57,12 @@ fn main() {
 
 enum MetaCommandResult {
     Success,
-    UNRECOGNIZED
+    UNRECOGNIZED,
 }
 
-fn do_meta_command(input_buffer:&str) -> MetaCommandResult {
+fn do_meta_command(input_buffer: &str, table: &mut Table) -> MetaCommandResult {
     if input_buffer.trim().eq(".exit") {
+        table.close();
         process::exit(0)
     } else {
         MetaCommandResult::UNRECOGNIZED
@@ -60,47 +71,51 @@ fn do_meta_command(input_buffer:&str) -> MetaCommandResult {
 
 enum StatementType {
     SELECT,
-    INSERT
+    INSERT,
 }
 
 struct Statement {
     kind: StatementType,
-    row_to_insert: Option<Row>
+    row_to_insert: Option<Row>,
 }
 
 enum PrepareResult {
     Success,
     UNRECOGNIZED,
-    SyntaxError(String)
+    SyntaxError(String),
 }
 
 enum ExecuteResult {
     Success,
-    TableFull
+    TableFull,
 }
 
 
-fn prepare_statement(input_buffer:&str, statement:&mut Statement) -> PrepareResult {
+fn prepare_statement(input_buffer: &str, statement: &mut Statement) -> PrepareResult {
     if input_buffer.starts_with("select") {
         statement.kind = StatementType::SELECT;
         PrepareResult::Success
     } else if input_buffer.starts_with("insert") {
 
-        let parts:Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
+        let parts: Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
         if parts.len() != 4 {
             PrepareResult::SyntaxError(input_buffer.to_owned())
         } else {
             let id = i32::from_str_radix(parts[1], 10).unwrap();
             if id < 0 {
-                return PrepareResult::SyntaxError("ID must be positive.".to_owned())
+                return PrepareResult::SyntaxError("ID must be positive.".to_owned());
             }
             let username = String::from(parts[2]);
             let email = String::from(parts[3]);
             if username.len() > 32 || email.len() > 256 {
-                return PrepareResult::SyntaxError("String is too long.".to_owned())
+                return PrepareResult::SyntaxError("String is too long.".to_owned());
             }
             statement.kind = StatementType::INSERT;
-            statement.row_to_insert = Some(Row {id: id, username: username, email: email});
+            statement.row_to_insert = Some(Row {
+                id: id,
+                username: username,
+                email: email,
+            });
             PrepareResult::Success
         }
     } else {
@@ -108,7 +123,7 @@ fn prepare_statement(input_buffer:&str, statement:&mut Statement) -> PrepareResu
     }
 }
 
-fn execute_statement(statement:&Statement, table: &mut Table) -> ExecuteResult {
+fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult {
     match statement.kind {
         StatementType::SELECT => {
             for i in 0..table.num_rows {
@@ -116,7 +131,7 @@ fn execute_statement(statement:&Statement, table: &mut Table) -> ExecuteResult {
                 println!("({}, {}, {})", row.id, &row.username, &row.email);
             }
             ExecuteResult::Success
-        },
+        }
         StatementType::INSERT => {
             if table.num_rows >= table.max_rows() {
                 ExecuteResult::TableFull
@@ -135,7 +150,9 @@ fn print_prompt() {
     io::stdout().flush().unwrap();
 }
 
-fn read_input(input_buffer:&mut String) {
+fn read_input(input_buffer: &mut String) {
     input_buffer.clear();
-    io::stdin().read_line(input_buffer).expect("read input error.");
+    io::stdin().read_line(input_buffer).expect(
+        "read input error.",
+    );
 }
