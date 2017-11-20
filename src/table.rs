@@ -1,6 +1,7 @@
 use std::ops::{Range, Index, IndexMut};
 use std::fs::{File, OpenOptions};
 use byteorder::{BigEndian, ByteOrder};
+use std::io::{Seek, SeekFrom, Read, Write};
 
 const PAGE_SIZE:usize = 4096;
 const MAX_PAGE_PER_TABLE:usize = 100;
@@ -22,12 +23,15 @@ impl Row {
     }
 
     fn deserialize(buf: &Vec<u8>, pos: usize) -> Row {
-        let mut position = pos;
-        let id = BigEndian::read_i32(buf.as_slice());
+        let mut bytes = vec![0;ROW_SIZE];
+        bytes.clone_from_slice(buf.index(Range{start: pos, end: pos + ROW_SIZE}));
+
+        let mut position = 0;
+        let id = BigEndian::read_i32(bytes.as_slice());
         position += 4;
-        let username = Row::read_string(buf, position, 32);
+        let username = Row::read_string(&bytes, position, 32);
         position += 32;
-        let email = Row::read_string(buf, position, 256);
+        let email = Row::read_string(&bytes, position, 256);
         Row {id: id, username: username, email: email}
     }
 
@@ -68,7 +72,12 @@ pub struct Table {
 impl Table {
     pub fn new(file:&str) -> Table {
         let pager = Pager::new(file);
-        return Table {pager: pager, num_rows: 0};
+        let num_rows = if pager.num_pages == 0 {0} else {1};
+        return Table {pager: pager, num_rows: num_rows};
+    }
+
+    pub fn close(self: &mut Table) {
+        self.pager.close();
     }
 
     pub fn max_rows(self:&Table) -> usize {
@@ -89,7 +98,7 @@ impl Table {
         self.num_rows
     }
 
-    pub fn get_row(self: &Table, row_index:usize) -> Row {
+    pub fn get_row(self: &mut Table, row_index:usize) -> Row {
         let (page, pos) = self.row_slot_for_read(row_index);
         Row::deserialize(page, pos)
     }
@@ -101,7 +110,7 @@ impl Table {
         return (page, ROW_SIZE * (row_index % rows_per_page));
     }
 
-    fn row_slot_for_read(self: &Table, row_index:usize) -> (&Page, usize) {
+    fn row_slot_for_read(self: &mut Table, row_index:usize) -> (&Page, usize) {
         let rows_per_page = PAGE_SIZE / ROW_SIZE;
         let page_index = row_index / rows_per_page;
         let page = self.pager.page_for_read(page_index);
@@ -110,29 +119,62 @@ impl Table {
 }
 
 struct Pager {
-    // file: File,
-    pages:Vec<Page>,
+    file: File,
+    pages:Vec<Option<Page>>,
     num_pages: usize
 }
 
 impl Pager {
     fn new(file: &str) -> Pager {
-        // let file = OpenOptions::new().read(true).write(true).create(true).open(file);
-        // let file_size = file.metadata().unwrap().len();
-        // let num_rows = file_size / ROW_SIZE;
-        // let num_pages = file_size / PAGE_SIZE;
-        let pages = Vec::with_capacity(MAX_PAGE_PER_TABLE);
-        Pager {pages: pages, num_pages: 0}
+        let file = OpenOptions::new().read(true).write(true).create(true).open(file).unwrap();
+        let file_size = file.metadata().unwrap().len();
+        let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
+        let pages = vec![None; MAX_PAGE_PER_TABLE];
+        Pager {file: file, pages: pages, num_pages: num_pages}
     }
 
-    fn page_for_read(self: &Pager, page_index: usize) -> &Page {
-        &self.pages[page_index]
+    fn close(self: &mut Pager) {
+        for page_index in 0..self.num_pages {
+            self.flush(page_index);
+        }
+    }
+
+    fn flush(self: &mut Pager, page_index: usize) {
+        let offset = page_index * PAGE_SIZE;
+        if let Some(page) = self.pages[page_index].as_ref() {
+            self.file.seek(SeekFrom::Start(offset as u64)).unwrap();
+            self.file.write_all(page.as_ref()).unwrap();
+        }
+    }
+
+    fn load(self: &mut Pager, page_index: usize) {
+        let offset = page_index * PAGE_SIZE;
+        self.file.seek(SeekFrom::Start(offset as u64)).unwrap();
+        let mut buf = vec![0; PAGE_SIZE];
+        self.file.read(buf.as_mut_slice()).unwrap();
+        self.pages[page_index] = Some(buf);
+    }
+
+    fn page_for_read(self: &mut Pager, page_index: usize) -> &Page {
+        if page_index >= self.num_pages {
+            panic!("read EOF");
+        } else if let None = self.pages[page_index] {
+            self.load(page_index);
+        }
+        self.pages[page_index].as_ref().unwrap()
     }
 
     fn page_for_write(self: &mut Pager, page_index: usize) -> &mut Page {
-        while self.pages.len() <= page_index {
-            self.pages.push(vec![0; PAGE_SIZE]);
+        if page_index > self.num_pages {
+            panic!("skipped write to a page");
+        } else if page_index == self.num_pages {
+            // need a new page
+            self.pages[page_index] = Some(vec![0; PAGE_SIZE]);
+            self.num_pages += 1;
+        } else if let None = self.pages[page_index] {
+            // read page from file
+            self.load(page_index);
         }
-        &mut self.pages[page_index]
+        self.pages[page_index].as_mut().unwrap()
     }
 }

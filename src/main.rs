@@ -3,13 +3,19 @@ extern crate byteorder;
 use std::io;
 use std::process;
 use std::io::Write;
+use std::env;
 
 mod table;
 use table::{Table, Row};
 
 fn main() {
+    let mut db_file = String::from("default.rdb");
+    if  env::args().count() > 1 {
+        db_file = env::args().nth(1).unwrap();
+    }
+
     //TODO: print rdb info
-    let mut table = Table::new("");
+    let mut table = Table::new(db_file.as_str());
 
     let mut input_buffer = String::new();
     loop {
@@ -18,7 +24,7 @@ fn main() {
         read_input(&mut input_buffer);
 
         if input_buffer.starts_with(".") {
-            match do_meta_command(&input_buffer) {
+            match do_meta_command(&input_buffer, &mut table) {
                 MetaCommandResult::Success => {},
                 MetaCommandResult::UNRECOGNIZED => {
                     println!("Unrecognized command: {}", input_buffer.trim());
@@ -50,8 +56,9 @@ enum MetaCommandResult {
     UNRECOGNIZED
 }
 
-fn do_meta_command(input_buffer:&str) -> MetaCommandResult {
+fn do_meta_command(input_buffer:&str, table: &mut Table) -> MetaCommandResult {
     if input_buffer.trim().eq(".exit") {
+        table.close();
         process::exit(0)
     } else {
         MetaCommandResult::UNRECOGNIZED
