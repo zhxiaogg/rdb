@@ -1,4 +1,4 @@
-use std::ops::{Range, Index, IndexMut};
+use std::ops::{Range, RangeFrom, Index, IndexMut};
 use std::fs::{File, OpenOptions};
 use byteorder::{BigEndian, ByteOrder};
 use std::io::{Seek, SeekFrom, Read, Write};
@@ -6,17 +6,42 @@ use std::io::{Seek, SeekFrom, Read, Write};
 const PAGE_SIZE: usize = 4096;
 const MAX_PAGE_PER_TABLE: usize = 100;
 const ROW_SIZE: usize = 4 + 32 + 256;
-const ROWS_PER_PAGE: usize = PAGE_SIZE / ROW_SIZE;
+
+const NODE_TYPE_SIZE: usize = 1;
+const IS_ROOT_SIZE: usize = 1;
+const PARENT_POINTER_SIZE: usize = 4;
+const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+
+const NUM_CELLS_OFFSET: usize = 2;
+const NUM_CELLS_SIZE: usize = 4;
+const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE;
+
+const CELL_OFFSET: usize = LEAF_NODE_HEADER_SIZE;
+const CELL_KEY_SIZE: usize = 4;
+const CELL_VALUE_SIZE: usize = ROW_SIZE;
+const LEAF_NODE_CELL_SIZE: usize = CELL_KEY_SIZE + CELL_VALUE_SIZE;
+const LEAF_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
+const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+
+pub fn print_constants() {
+    println!("Constants:");
+    println!("ROW_SIZE: {}", ROW_SIZE);
+    println!("COMMON_NODE_HEADER_SIZE: {}", COMMON_NODE_HEADER_SIZE);
+    println!("LEAF_NODE_HEADER_SIZE: {}", LEAF_NODE_HEADER_SIZE);
+    println!("LEAF_NODE_CELL_SIZE: {}", LEAF_NODE_CELL_SIZE);
+    println!("LEAF_NODE_SPACE_FOR_CELLS: {}", LEAF_NODE_SPACE_FOR_CELLS);
+    println!("LEAF_NODE_MAX_CELLS: {}", LEAF_NODE_MAX_CELLS);
+}
 
 pub struct Row {
-    pub id: i32,
+    pub id: u32,
     pub username: String,
     pub email: String,
 }
 
 impl Row {
     fn serialize(row: &Row, page: &mut Page, pos: usize) {
-        BigEndian::write_i32(
+        BigEndian::write_u32(
             page.index_mut(Range {
                 start: pos,
                 end: pos + 4,
@@ -35,7 +60,7 @@ impl Row {
         }));
 
         let mut position = 0;
-        let id = BigEndian::read_i32(bytes.as_slice());
+        let id = BigEndian::read_u32(bytes.as_slice());
         position += 4;
         let username = Row::read_string(&bytes, position, 32);
         position += 32;
@@ -79,23 +104,67 @@ impl Row {
 
 type Page = Vec<u8>;
 
+trait PageTrait {
+    fn new() -> Page;
+
+    fn pos_for_cell(cell_index: usize) -> usize;
+
+    fn num_cells(&self) -> u32;
+
+    fn cell_key(&self, cell_index: usize) -> u32;
+
+    fn set_num_cells(&mut self, num_cells: u32);
+
+    fn print(&self);
+}
+
+impl PageTrait for Page {
+    fn new() -> Page {
+        let mut page = vec![0; PAGE_SIZE];
+        page.set_num_cells(0);
+        page
+    }
+
+    fn pos_for_cell(cell_index: usize) -> usize {
+        CELL_OFFSET + cell_index * LEAF_NODE_CELL_SIZE
+    }
+
+    fn num_cells(self: &Page) -> u32 {
+        BigEndian::read_u32(self.index(RangeFrom { start: NUM_CELLS_OFFSET }))
+    }
+
+    fn cell_key(self: &Page, cell_index: usize) -> u32 {
+        let pos = Page::pos_for_cell(cell_index);
+        BigEndian::read_u32(self.index(RangeFrom { start: pos }))
+    }
+
+    fn set_num_cells(&mut self, num_cells: u32) {
+        BigEndian::write_u32(
+            self.index_mut(RangeFrom { start: NUM_CELLS_OFFSET }),
+            num_cells,
+        )
+    }
+
+    fn print(&self) {
+        let num_cells = self.num_cells();
+        println!("leaf (size {})", num_cells);
+        for cell_index in 0..(num_cells as usize) {
+            println!("  - {} : {}", cell_index, self.cell_key(cell_index));
+        }
+    }
+}
+
 pub struct Table {
     pager: Pager,
-    pub num_rows: usize,
+    root_page_index: usize,
 }
 
 impl Table {
     pub fn new(file: &str) -> Table {
         let pager = Pager::new(file);
-        let num_rows = if pager.num_pages == 0 {
-            0
-        } else {
-            // this is a bug, the last page will lost if its rows length > 1
-            (pager.num_pages - 1) * ROWS_PER_PAGE + 1
-        };
         return Table {
             pager: pager,
-            num_rows: num_rows,
+            root_page_index: 0,
         };
     }
 
@@ -106,17 +175,27 @@ impl Table {
     }
 
     pub fn is_full(self: &Table) -> bool {
-        return self.num_rows >= PAGE_SIZE / ROW_SIZE * MAX_PAGE_PER_TABLE;
+        return false;
     }
 
     //TODO: select cursor should not pass a mutable table
     pub fn select_cursor(self: &mut Table) -> Cursor {
-        Cursor::new(self, 0)
+        let page_index = self.root_page_index;
+        Cursor::new(self, page_index, 0)
     }
 
     pub fn insert_cursor(self: &mut Table) -> Cursor {
-        let row_index = self.num_rows;
-        Cursor::new(self, row_index)
+        let page_index = self.root_page_index;
+        let cell_index = if self.pager.num_pages == 0 {
+            0
+        } else {
+            self.pager.page_for_read(page_index).num_cells()
+        };
+        Cursor::new(self, page_index, cell_index as usize)
+    }
+
+    pub fn debug_index(&mut self) {
+        self.pager.print();
     }
 }
 
@@ -183,52 +262,58 @@ impl Pager {
         }
         self.pages[page_index].as_mut().unwrap()
     }
+
+    pub fn print(&mut self) {
+        println!("Tree:");
+        for page_index in 0..self.num_pages {
+            let page = self.page_for_read(page_index);
+            page.print();
+        }
+    }
 }
 
 pub struct Cursor<'a> {
     table: &'a mut Table,
-    curr_index: usize,
+    page_index: usize,
+    cell_index: usize,
 }
 
 impl<'a> Cursor<'a> {
-    fn new(table: &'a mut Table, row_index: usize) -> Cursor<'a> {
+    fn new(table: &'a mut Table, page_index: usize, cell_index: usize) -> Cursor<'a> {
         Cursor {
             table: table,
-            curr_index: row_index,
+            page_index: page_index,
+            cell_index: cell_index,
         }
     }
 
-    pub fn end_of_table(self: &Cursor<'a>) -> bool {
-        self.curr_index >= self.table.num_rows
+    pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
+        let page_index = self.page_index;
+        self.table.pager.num_pages == 0 ||
+            (self.cell_index >= self.table.pager.page_for_read(page_index).num_cells() as usize)
     }
 
     pub fn advance(self: &mut Cursor<'a>) {
-        self.curr_index += 1;
+        self.cell_index += 1;
     }
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
-        let row_index = self.curr_index;
-        let (page, pos) = Cursor::row_slot_for_read(self.table, row_index);
-        Row::deserialize(page, pos)
+        let cell_index = self.cell_index;
+        let page_index = self.page_index;
+        let page = self.table.pager.page_for_read(page_index);
+        let cell_pos = Page::pos_for_cell(cell_index);
+        Row::deserialize(page, cell_pos + CELL_KEY_SIZE)
     }
 
-    pub fn save(self: &mut Cursor<'a>, row: &Row) {
-        {
-            let (page, pos) = Cursor::row_slot_for_write(self.table, self.curr_index);
-            Row::serialize(row, page, pos);
-        }
-        self.table.num_rows += 1;
-    }
+    pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) {
+        let page_index = self.page_index;
+        let cell_index = self.cell_index;
+        let page = self.table.pager.page_for_write(page_index);
+        let cell_pos = Page::pos_for_cell(cell_index);
 
-    fn row_slot_for_write(table: &mut Table, row_index: usize) -> (&mut Page, usize) {
-        let page_index = row_index / ROWS_PER_PAGE;
-        let page = table.pager.page_for_write(page_index);
-        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
-    }
-
-    fn row_slot_for_read(table: &mut Table, row_index: usize) -> (&Page, usize) {
-        let page_index = row_index / ROWS_PER_PAGE;
-        let page = table.pager.page_for_read(page_index);
-        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
+        BigEndian::write_u32(page.index_mut(RangeFrom { start: cell_pos }), key);
+        Row::serialize(row, page, cell_pos + CELL_KEY_SIZE);
+        let num_cells = page.num_cells();
+        page.set_num_cells(num_cells + 1);
     }
 }
