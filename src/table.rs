@@ -139,22 +139,24 @@ impl<'a> Cursor<'a> {
     }
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
-        let cell_index = self.cell_index;
+        let cell_pos = Page::pos_for_cell(self.cell_index);
+
         let page_index = self.page_index;
         let page = self.table.pager.page_for_read(page_index);
-        let cell_pos = Page::pos_for_cell(cell_index);
+
         Row::deserialize(page, cell_pos + CELL_KEY_SIZE)
     }
 
     pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) {
+        let cell_pos = Page::pos_for_cell(self.cell_index);
+
         let page_index = self.page_index;
-        let cell_index = self.cell_index;
         let page = self.table.pager.page_for_write(page_index);
-        let cell_pos = Page::pos_for_cell(cell_index);
 
         BigEndian::write_u32(page.index_mut(RangeFrom { start: cell_pos }), key);
         Row::serialize(row, page, cell_pos + CELL_KEY_SIZE);
-        let num_cells = page.num_cells();
-        page.set_num_cells(num_cells + 1);
+
+        let num_cells = page.num_cells() + 1;
+        page.set_num_cells(num_cells);
     }
 }

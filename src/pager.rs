@@ -109,6 +109,9 @@ impl Pager {
             .open(file)
             .unwrap();
         let file_size = file.metadata().unwrap().len();
+        if file_size % (PAGE_SIZE as u64) != 0 {
+            panic!("Db file is not a whole number of pages. Corrupt file.");
+        }
         let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
         let pages = vec![None; MAX_PAGE_PER_TABLE];
         Pager {
