@@ -6,6 +6,8 @@ use std::io::Write;
 use std::env;
 
 mod table;
+mod pager;
+
 use table::{Table, Row};
 
 fn main() {
@@ -53,10 +55,10 @@ fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
         table.close();
         process::exit(0)
     } else if input_buffer.eq(".constants") {
-        table::print_constants();
+        pager::print_constants();
         ExecuteResult::Ok
     } else if input_buffer.eq(".btree") {
-        table.debug_index();
+        table.debug_print();
         ExecuteResult::Ok
     } else {
         ExecuteResult::Err(format!("Unrecognized command: {}", input_buffer))
