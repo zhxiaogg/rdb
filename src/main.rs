@@ -80,7 +80,10 @@ enum ExecuteResult {
 
 fn prepare_statement(input_buffer: &str) -> PrepareResult {
     if input_buffer.starts_with("select") {
-        PrepareResult::Ok(Statement{kind:StatementType::SELECT, row_to_insert: None})
+        PrepareResult::Ok(Statement {
+            kind: StatementType::SELECT,
+            row_to_insert: None,
+        })
     } else if input_buffer.starts_with("insert") {
 
         let parts: Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
@@ -99,10 +102,11 @@ fn prepare_statement(input_buffer: &str) -> PrepareResult {
             let statement = Statement {
                 kind: StatementType::INSERT,
                 row_to_insert: Some(Row {
-                id: id,
-                username: username,
-                email: email,
-            })};
+                    id: id,
+                    username: username,
+                    email: email,
+                }),
+            };
             PrepareResult::Ok(statement)
         }
     } else {
@@ -120,7 +124,7 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
             ExecuteResult::Ok
         }
         StatementType::INSERT => {
-            if table.num_rows >= table.max_rows() {
+            if table.is_full() {
                 ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
                 table.insert(r);

@@ -15,12 +15,16 @@ pub struct Row {
 }
 
 impl Row {
-    fn serialize(row: &Row) -> Vec<u8> {
-        let mut buf: Vec<u8> = vec![0; ROW_SIZE];
-        BigEndian::write_i32(&mut buf.index_mut(Range { start: 0, end: 4 }), row.id);
-        Row::write_string(&mut buf, 4, &row.username, 32);
-        Row::write_string(&mut buf, 36, &row.email, 256);
-        return buf;
+    fn serialize(row: &Row, page: &mut Page, pos: usize) {
+        BigEndian::write_i32(
+            page.index_mut(Range {
+                start: pos,
+                end: pos + 4,
+            }),
+            row.id,
+        );
+        Row::write_string(page, pos + 4, &row.username, 32);
+        Row::write_string(page, pos + 36, &row.email, 256);
     }
 
     fn deserialize(buf: &Vec<u8>, pos: usize) -> Row {
@@ -101,19 +105,15 @@ impl Table {
         }
     }
 
-    pub fn max_rows(self: &Table) -> usize {
-        return PAGE_SIZE / ROW_SIZE * MAX_PAGE_PER_TABLE;
+    pub fn is_full(self: &Table) -> bool {
+        return self.num_rows >= PAGE_SIZE / ROW_SIZE * MAX_PAGE_PER_TABLE;
     }
 
     pub fn insert(self: &mut Table, row: &Row) -> usize {
-        let bytes = Row::serialize(row);
         {
             let row_index = self.num_rows;
-            let (page, mut pos) = self.row_slot_for_write(row_index);
-            for b in bytes {
-                page[pos] = b;
-                pos += 1;
-            }
+            let (page, pos) = self.row_slot_for_write(row_index);
+            Row::serialize(row, page, pos);
         }
         self.num_rows += 1;
         self.num_rows
@@ -125,17 +125,15 @@ impl Table {
     }
 
     fn row_slot_for_write(self: &mut Table, row_index: usize) -> (&mut Page, usize) {
-        let rows_per_page = PAGE_SIZE / ROW_SIZE;
-        let page_index = row_index / rows_per_page;
+        let page_index = row_index / ROWS_PER_PAGE;
         let page = self.pager.page_for_write(page_index);
-        return (page, ROW_SIZE * (row_index % rows_per_page));
+        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
     }
 
     fn row_slot_for_read(self: &mut Table, row_index: usize) -> (&Page, usize) {
-        let rows_per_page = PAGE_SIZE / ROW_SIZE;
-        let page_index = row_index / rows_per_page;
+        let page_index = row_index / ROWS_PER_PAGE;
         let page = self.pager.page_for_read(page_index);
-        return (page, ROW_SIZE * (row_index % rows_per_page));
+        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
     }
 }
 
