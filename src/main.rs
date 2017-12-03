@@ -6,6 +6,8 @@ use std::io::Write;
 use std::env;
 
 mod table;
+mod pager;
+
 use table::{Table, Row};
 
 fn main() {
@@ -52,6 +54,12 @@ fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
     if input_buffer.eq(".exit") {
         table.close();
         process::exit(0)
+    } else if input_buffer.eq(".constants") {
+        pager::print_constants();
+        ExecuteResult::Ok
+    } else if input_buffer.eq(".btree") {
+        table.debug_print();
+        ExecuteResult::Ok
     } else {
         ExecuteResult::Err(format!("Unrecognized command: {}", input_buffer))
     }
@@ -102,7 +110,7 @@ fn prepare_statement(input_buffer: &str) -> PrepareResult {
             let statement = Statement {
                 kind: StatementType::INSERT,
                 row_to_insert: Some(Row {
-                    id: id,
+                    id: id as u32,
                     username: username,
                     email: email,
                 }),
@@ -130,7 +138,7 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
                 ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
                 let mut cursor = table.insert_cursor();
-                cursor.save(r);
+                cursor.save(r.id, r);
                 ExecuteResult::Ok
             } else {
                 ExecuteResult::Ok
