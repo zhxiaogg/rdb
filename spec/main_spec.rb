@@ -108,6 +108,23 @@ describe 'database' do
     ])
   end
 
+  it 'prints an error message if there is a duplicate id' do
+    script = [
+      "insert 1 user1 person1@example.com",
+      "insert 1 user1 person1@example.com",
+      "select",
+      ".exit",
+    ]
+    result = run_script(script)
+    expect(result).to eq([
+      "rdb > Executed.",
+      "rdb > Error: Duplicate key.",
+      "rdb > (1, user1, person1@example.com)",
+      "Executed.",
+      "rdb > ",
+    ])
+  end
+
   it 'allows printing out the structure of a one-node btree' do
     script = [3, 1, 2].map do |i|
       "insert #{i} user#{i} person#{i}@example.com"
