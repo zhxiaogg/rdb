@@ -25,47 +25,35 @@ fn main() {
         read_input(&mut input_buffer);
 
         if input_buffer.starts_with(".") {
-            match do_meta_command(&input_buffer, &mut table) {
-                MetaCommandResult::Success => {}
-                MetaCommandResult::UNRECOGNIZED => {
-                    println!("Unrecognized command: {}", input_buffer.trim());
+            match do_meta_command(&input_buffer.trim(), &mut table) {
+                ExecuteResult::Ok => {}
+                ExecuteResult::Err(msg) => {
+                    println!("{}", &msg);
                 }
             }
             continue;
         }
 
-        let mut statement = Statement {
-            kind: StatementType::SELECT,
-            row_to_insert: None,
-        };
-        match prepare_statement(&input_buffer, &mut statement) {
-            PrepareResult::Success => {
+        match prepare_statement(&input_buffer.trim()) {
+            PrepareResult::Ok(statement) => {
                 match execute_statement(&statement, &mut table) {
-                    ExecuteResult::Success => println!("Executed."),
-                    ExecuteResult::TableFull => println!("Error: Table full."),
+                    ExecuteResult::Ok => println!("Executed."),
+                    ExecuteResult::Err(msg) => println!("{}", &msg),
                 }
             }
-            PrepareResult::UNRECOGNIZED => {
-                println!("Unrecognized command: {}", input_buffer.trim());
-            }
-            PrepareResult::SyntaxError(message) => {
-                println!("{}", &message);
+            PrepareResult::Err(msg) => {
+                println!("{}", &msg);
             }
         }
     }
 }
 
-enum MetaCommandResult {
-    Success,
-    UNRECOGNIZED,
-}
-
-fn do_meta_command(input_buffer: &str, table: &mut Table) -> MetaCommandResult {
-    if input_buffer.trim().eq(".exit") {
+fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
+    if input_buffer.eq(".exit") {
         table.close();
         process::exit(0)
     } else {
-        MetaCommandResult::UNRECOGNIZED
+        ExecuteResult::Err(format!("Unrecognized command: {}", input_buffer))
     }
 }
 
@@ -80,46 +68,45 @@ struct Statement {
 }
 
 enum PrepareResult {
-    Success,
-    UNRECOGNIZED,
-    SyntaxError(String),
+    Ok(Statement),
+    Err(String),
 }
 
 enum ExecuteResult {
-    Success,
-    TableFull,
+    Ok,
+    Err(String),
 }
 
 
-fn prepare_statement(input_buffer: &str, statement: &mut Statement) -> PrepareResult {
+fn prepare_statement(input_buffer: &str) -> PrepareResult {
     if input_buffer.starts_with("select") {
-        statement.kind = StatementType::SELECT;
-        PrepareResult::Success
+        PrepareResult::Ok(Statement{kind:StatementType::SELECT, row_to_insert: None})
     } else if input_buffer.starts_with("insert") {
 
         let parts: Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
         if parts.len() != 4 {
-            PrepareResult::SyntaxError(input_buffer.to_owned())
+            PrepareResult::Err(input_buffer.to_owned())
         } else {
             let id = i32::from_str_radix(parts[1], 10).unwrap();
             if id < 0 {
-                return PrepareResult::SyntaxError("ID must be positive.".to_owned());
+                return PrepareResult::Err("ID must be positive.".to_owned());
             }
             let username = String::from(parts[2]);
             let email = String::from(parts[3]);
             if username.len() > 32 || email.len() > 256 {
-                return PrepareResult::SyntaxError("String is too long.".to_owned());
+                return PrepareResult::Err("String is too long.".to_owned());
             }
-            statement.kind = StatementType::INSERT;
-            statement.row_to_insert = Some(Row {
+            let statement = Statement {
+                kind: StatementType::INSERT,
+                row_to_insert: Some(Row {
                 id: id,
                 username: username,
                 email: email,
-            });
-            PrepareResult::Success
+            })};
+            PrepareResult::Ok(statement)
         }
     } else {
-        PrepareResult::UNRECOGNIZED
+        PrepareResult::Err(format!("Unrecognized command: {}", input_buffer).to_owned())
     }
 }
 
@@ -130,16 +117,16 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
                 let row = table.get_row(i);
                 println!("({}, {}, {})", row.id, &row.username, &row.email);
             }
-            ExecuteResult::Success
+            ExecuteResult::Ok
         }
         StatementType::INSERT => {
             if table.num_rows >= table.max_rows() {
-                ExecuteResult::TableFull
+                ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
                 table.insert(r);
-                ExecuteResult::Success
+                ExecuteResult::Ok
             } else {
-                ExecuteResult::Success
+                ExecuteResult::Ok
             }
         }
     }
