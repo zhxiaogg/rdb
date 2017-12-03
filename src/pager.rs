@@ -57,7 +57,17 @@ impl From<u8> for PageType {
 pub type Page = Vec<u8>;
 
 pub trait PageTrait {
-    fn new_page() -> Page;
+    fn debug_print(&self);
+
+    fn page_type(&self) -> PageType;
+
+    fn set_page_type(&mut self, page_type: PageType);
+
+    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize);
+}
+
+pub trait LeafPage {
+    fn new_leaf_page() -> Page;
 
     fn pos_for_cell(cell_index: usize) -> usize;
 
@@ -67,19 +77,46 @@ pub trait PageTrait {
 
     fn set_num_cells(&mut self, num_cells: u32);
 
-    fn debug_print(&self);
-
-    fn page_type(&self) -> PageType;
-
-    fn set_page_type(&mut self, page_type: PageType);
-
     fn cell_for_key(&self, key: u32) -> usize;
-
-    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize);
 }
 
 impl PageTrait for Page {
-    fn new_page() -> Page {
+    fn debug_print(&self) {
+        let num_cells = self.num_cells();
+        println!("leaf (size {})", num_cells);
+        for cell_index in 0..(num_cells as usize) {
+            println!("  - {} : {}", cell_index, self.key_for_cell(cell_index));
+        }
+    }
+
+    fn page_type(&self) -> PageType {
+        let v = self[PAGE_TYPE_OFFSET];
+        PageType::from(v)
+    }
+
+    fn set_page_type(&mut self, page_type: PageType) {
+        self[PAGE_TYPE_OFFSET] = page_type as u8;
+    }
+
+    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize) {
+        let mut vec = vec![0; len];
+        {
+            let slice = self.index(Range {
+                start: from,
+                end: from + len,
+            }).clone();
+            vec.clone_from_slice(slice);
+        }
+        let mut i = 0;
+        for b in vec {
+            self[to + i] = b;
+            i += 1;
+        }
+    }
+}
+
+impl LeafPage for Page {
+    fn new_leaf_page() -> Page {
         let mut page = vec![0; PAGE_SIZE];
         page.set_page_type(PageType::Leaf);
         page.set_num_cells(0);
@@ -112,23 +149,6 @@ impl PageTrait for Page {
         )
     }
 
-    fn debug_print(&self) {
-        let num_cells = self.num_cells();
-        println!("leaf (size {})", num_cells);
-        for cell_index in 0..(num_cells as usize) {
-            println!("  - {} : {}", cell_index, self.key_for_cell(cell_index));
-        }
-    }
-
-    fn page_type(&self) -> PageType {
-        let v = self[PAGE_TYPE_OFFSET];
-        PageType::from(v)
-    }
-
-    fn set_page_type(&mut self, page_type: PageType) {
-        self[PAGE_TYPE_OFFSET] = page_type as u8;
-    }
-
     fn cell_for_key(&self, key: u32) -> usize {
         let num_cells = self.num_cells();
         if num_cells == 0 {
@@ -151,22 +171,6 @@ impl PageTrait for Page {
             }
         }
         return index;
-    }
-
-    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize) {
-        let mut vec = vec![0; len];
-        {
-            let slice = self.index(Range {
-                start: from,
-                end: from + len,
-            }).clone();
-            vec.clone_from_slice(slice);
-        }
-        let mut i = 0;
-        for b in vec {
-            self[to + i] = b;
-            i += 1;
-        }
     }
 }
 
@@ -247,7 +251,7 @@ impl Pager {
             panic!("skipped write to a page");
         } else if page_index == self.num_pages {
             // need a new page
-            self.pages[page_index] = Some(Page::new_page());
+            self.pages[page_index] = Some(Page::new_leaf_page());
             self.num_pages += 1;
         } else if let None = self.pages[page_index] {
             // load page from file

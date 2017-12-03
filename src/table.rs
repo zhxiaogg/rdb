@@ -1,7 +1,7 @@
 use std::ops::{Range, RangeFrom, Index, IndexMut};
 use byteorder::{BigEndian, ByteOrder};
 
-use pager::{Pager, Page, PageTrait, ROW_SIZE, CELL_KEY_SIZE, LEAF_NODE_CELL_SIZE,
+use pager::{Pager, Page, LeafPage, PageTrait, ROW_SIZE, CELL_KEY_SIZE, LEAF_NODE_CELL_SIZE,
             LEAF_NODE_MAX_CELLS};
 
 pub struct Row {
