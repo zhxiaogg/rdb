@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Read, Write};
-use std::ops::{RangeFrom, Index, IndexMut};
+use std::ops::{Range, RangeFrom, Index, IndexMut};
 
 use byteorder::{BigEndian, ByteOrder};
 
@@ -9,10 +9,11 @@ const PAGE_SIZE: usize = 4096;
 const MAX_PAGE_PER_TABLE: usize = 100;
 pub const ROW_SIZE: usize = 4 + 32 + 256;
 
-const NODE_TYPE_SIZE: usize = 1;
+const PAGE_TYPE_OFFSET: usize = 0;
+const PAGE_TYPE_SIZE: usize = 1;
 const IS_ROOT_SIZE: usize = 1;
 const PARENT_POINTER_SIZE: usize = 4;
-const COMMON_NODE_HEADER_SIZE: usize = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+const COMMON_NODE_HEADER_SIZE: usize = PAGE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
 
 const NUM_CELLS_OFFSET: usize = 2;
 const NUM_CELLS_SIZE: usize = 4;
@@ -21,9 +22,9 @@ const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE;
 const CELL_OFFSET: usize = LEAF_NODE_HEADER_SIZE;
 pub const CELL_KEY_SIZE: usize = 4;
 const CELL_VALUE_SIZE: usize = ROW_SIZE;
-const LEAF_NODE_CELL_SIZE: usize = CELL_KEY_SIZE + CELL_VALUE_SIZE;
+pub const LEAF_NODE_CELL_SIZE: usize = CELL_KEY_SIZE + CELL_VALUE_SIZE;
 const LEAF_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
-const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+pub const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
 
 // TODO: find a better place for this method
 pub fn print_constants() {
@@ -36,25 +37,51 @@ pub fn print_constants() {
     println!("LEAF_NODE_MAX_CELLS: {}", LEAF_NODE_MAX_CELLS);
 }
 
+pub enum PageType {
+    Internal = 0,
+    Leaf = 1,
+}
+
+impl From<u8> for PageType {
+    fn from(v: u8) -> PageType {
+        if v == 0u8 {
+            PageType::Internal
+        } else if v == 1u8 {
+            PageType::Leaf
+        } else {
+            panic!("wtf: invalid page type!")
+        }
+    }
+}
+
 pub type Page = Vec<u8>;
 
 pub trait PageTrait {
-    fn new() -> Page;
+    fn new_page() -> Page;
 
     fn pos_for_cell(cell_index: usize) -> usize;
 
     fn num_cells(&self) -> u32;
 
-    fn cell_key(&self, cell_index: usize) -> u32;
+    fn key_for_cell(&self, cell_index: usize) -> u32;
 
     fn set_num_cells(&mut self, num_cells: u32);
 
     fn debug_print(&self);
+
+    fn page_type(&self) -> PageType;
+
+    fn set_page_type(&mut self, page_type: PageType);
+
+    fn cell_for_key(&self, key: u32) -> usize;
+
+    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize);
 }
 
 impl PageTrait for Page {
-    fn new() -> Page {
+    fn new_page() -> Page {
         let mut page = vec![0; PAGE_SIZE];
+        page.set_page_type(PageType::Leaf);
         page.set_num_cells(0);
         page
     }
@@ -67,7 +94,7 @@ impl PageTrait for Page {
         BigEndian::read_u32(self.index(RangeFrom { start: NUM_CELLS_OFFSET }))
     }
 
-    fn cell_key(self: &Page, cell_index: usize) -> u32 {
+    fn key_for_cell(self: &Page, cell_index: usize) -> u32 {
         if cell_index >= self.num_cells() as usize {
             panic!("invalid cell index!");
         }
@@ -89,7 +116,56 @@ impl PageTrait for Page {
         let num_cells = self.num_cells();
         println!("leaf (size {})", num_cells);
         for cell_index in 0..(num_cells as usize) {
-            println!("  - {} : {}", cell_index, self.cell_key(cell_index));
+            println!("  - {} : {}", cell_index, self.key_for_cell(cell_index));
+        }
+    }
+
+    fn page_type(&self) -> PageType {
+        let v = self[PAGE_TYPE_OFFSET];
+        PageType::from(v)
+    }
+
+    fn set_page_type(&mut self, page_type: PageType) {
+        self[PAGE_TYPE_OFFSET] = page_type as u8;
+    }
+
+    fn cell_for_key(&self, key: u32) -> usize {
+        let num_cells = self.num_cells();
+        if num_cells == 0 {
+            return 0;
+        }
+
+        // binary search
+        let mut high = num_cells as usize;
+        let mut index = 0usize;
+        while index != high {
+            let mid = (index + high) / 2;
+            let curr_key = self.key_for_cell(mid);
+            if curr_key == key {
+                index = mid;
+                break;
+            } else if curr_key < key {
+                index = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return index;
+    }
+
+    fn move_slice_internally(&mut self, from: usize, to: usize, len: usize) {
+        let mut vec = vec![0; len];
+        {
+            let slice = self.index(Range {
+                start: from,
+                end: from + len,
+            }).clone();
+            vec.clone_from_slice(slice);
+        }
+        let mut i = 0;
+        for b in vec {
+            self[to + i] = b;
+            i += 1;
         }
     }
 }
@@ -98,6 +174,7 @@ pub struct Pager {
     file: File,
     pages: Vec<Option<Page>>,
     pub num_pages: usize,
+    root_page_index: usize,
 }
 
 impl Pager {
@@ -118,6 +195,24 @@ impl Pager {
             file: file,
             pages: pages,
             num_pages: num_pages,
+            root_page_index: 0,
+        }
+    }
+
+    pub fn root_page_index(&self) -> usize {
+        self.root_page_index
+    }
+
+    pub fn find_cell(&mut self, key: u32) -> (usize, usize) {
+        let page_index = self.root_page_index;
+        let page = self.page_for_read(page_index);
+        let page_type = page.page_type();
+        match page_type {
+            PageType::Leaf => {
+                let cell_index = page.cell_for_key(key);
+                (page_index, cell_index)
+            }
+            PageType::Internal => panic!("not implemented."),
         }
     }
 
@@ -152,7 +247,7 @@ impl Pager {
             panic!("skipped write to a page");
         } else if page_index == self.num_pages {
             // need a new page
-            self.pages[page_index] = Some(vec![0; PAGE_SIZE]);
+            self.pages[page_index] = Some(Page::new_page());
             self.num_pages += 1;
         } else if let None = self.pages[page_index] {
             // load page from file
