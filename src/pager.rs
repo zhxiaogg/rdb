@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Read, Write};
-use std::ops::{Range, RangeFrom, Index, IndexMut};
+use std::ops::{Range,RangeFrom, Index, IndexMut};
 
 use byteorder::{BigEndian, ByteOrder};
 
@@ -43,7 +43,7 @@ pub enum PageType {
 }
 
 impl From<u8> for PageType {
-    fn from(v: u8) -> PageType {
+    fn from(v:u8) -> PageType {
         if v == 0u8 {
             PageType::Internal
         } else if v == 1u8 {
@@ -63,7 +63,7 @@ pub trait PageTrait {
 
     fn num_cells(&self) -> u32;
 
-    fn cell_key(&self, cell_index: usize) -> u32;
+    fn key_for_cell(&self, cell_index: usize) -> u32;
 
     fn set_num_cells(&mut self, num_cells: u32);
 
@@ -71,11 +71,11 @@ pub trait PageTrait {
 
     fn page_type(&self) -> PageType;
 
-    fn set_page_type(&mut self, page_type: PageType);
+    fn set_page_type(&mut self, page_type:PageType);
 
-    fn cell_index_for_key(&self, key: u32) -> usize;
+    fn cell_for_key(&self, key:u32) -> usize;
 
-    fn copy_slice(&mut self, from: usize, to: usize, len: usize);
+    fn move_slice_internally(&mut self, from: usize, to:usize, len: usize);
 }
 
 impl PageTrait for Page {
@@ -94,7 +94,7 @@ impl PageTrait for Page {
         BigEndian::read_u32(self.index(RangeFrom { start: NUM_CELLS_OFFSET }))
     }
 
-    fn cell_key(self: &Page, cell_index: usize) -> u32 {
+    fn key_for_cell(self: &Page, cell_index: usize) -> u32 {
         if cell_index >= self.num_cells() as usize {
             panic!("invalid cell index!");
         }
@@ -116,7 +116,7 @@ impl PageTrait for Page {
         let num_cells = self.num_cells();
         println!("leaf (size {})", num_cells);
         for cell_index in 0..(num_cells as usize) {
-            println!("  - {} : {}", cell_index, self.cell_key(cell_index));
+            println!("  - {} : {}", cell_index, self.key_for_cell(cell_index));
         }
     }
 
@@ -126,10 +126,10 @@ impl PageTrait for Page {
     }
 
     fn set_page_type(&mut self, page_type: PageType) {
-        self[PAGE_TYPE_OFFSET] = page_type as u8;
+        self[PAGE_TYPE_OFFSET] =  page_type as u8;
     }
 
-    fn cell_index_for_key(&self, key: u32) -> usize {
+    fn cell_for_key(&self, key: u32) -> usize {
         let num_cells = self.num_cells();
         if num_cells == 0 {
             return 0;
@@ -140,7 +140,7 @@ impl PageTrait for Page {
         let mut index = 0usize;
         while index != high {
             let mid = (index + high) / 2;
-            let curr_key = self.cell_key(mid);
+            let curr_key = self.key_for_cell(mid);
             if curr_key == key {
                 index = mid;
                 break;
@@ -153,19 +153,16 @@ impl PageTrait for Page {
         return index;
     }
 
-    fn copy_slice(&mut self, from: usize, to: usize, len: usize) {
-        let mut vec = vec![0; len];
+    fn move_slice_internally(&mut self, from: usize, to:usize, len: usize) {
+        let mut vec = vec![0;len];
         {
-            let slice = self.index(Range {
-                start: from,
-                end: from + len,
-            }).clone();
+            let slice = self.index(Range{start:from, end: from + len}).clone();
             vec.clone_from_slice(slice);
         }
         let mut i = 0;
         for b in vec {
             self[to + i] = b;
-            i += 1;
+            i+=1;
         }
     }
 }
@@ -174,7 +171,7 @@ pub struct Pager {
     file: File,
     pages: Vec<Option<Page>>,
     pub num_pages: usize,
-    root_page_index: usize,
+    root_page_index:usize,
 }
 
 impl Pager {
@@ -209,10 +206,12 @@ impl Pager {
         let page_type = page.page_type();
         match page_type {
             PageType::Leaf => {
-                let cell_index = page.cell_index_for_key(key);
+                let cell_index = page.cell_for_key(key);
                 (page_index, cell_index)
-            }
-            PageType::Internal => panic!("not implemented."),
+            },
+            PageType::Internal => {
+                panic!("not implemented.")
+            },
         }
     }
 

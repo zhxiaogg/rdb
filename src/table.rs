@@ -163,14 +163,14 @@ impl<'a> Cursor<'a> {
         }
 
         if cell_index < num_cells {
-            if page.cell_key(cell_index) == key {
+            if page.key_for_cell(cell_index) == key {
                 return Result::Err("Error: Duplicate key.".to_owned());
             }
             // need move existed cells
             for cell_index in (self.cell_index..num_cells).rev() {
                 let cell_pos = Page::pos_for_cell(cell_index);
                 let new_cell_pos = cell_pos + LEAF_NODE_CELL_SIZE;
-                page.copy_slice(cell_pos, new_cell_pos, LEAF_NODE_CELL_SIZE);
+                page.move_slice_internally(cell_pos, new_cell_pos, LEAF_NODE_CELL_SIZE);
             }
         }
 
