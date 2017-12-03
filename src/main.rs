@@ -117,8 +117,10 @@ fn prepare_statement(input_buffer: &str) -> PrepareResult {
 fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult {
     match statement.kind {
         StatementType::SELECT => {
-            for i in 0..table.num_rows {
-                let row = table.get_row(i);
+            let mut cursor = table.select_cursor();
+            while cursor.has_next_row() {
+                cursor.next_row();
+                let row = cursor.get();
                 println!("({}, {}, {})", row.id, &row.username, &row.email);
             }
             ExecuteResult::Ok
@@ -127,7 +129,8 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
             if table.is_full() {
                 ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
-                table.insert(r);
+                let mut cursor = table.insert_cursor();
+                cursor.save(r);
                 ExecuteResult::Ok
             } else {
                 ExecuteResult::Ok

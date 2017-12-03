@@ -109,31 +109,14 @@ impl Table {
         return self.num_rows >= PAGE_SIZE / ROW_SIZE * MAX_PAGE_PER_TABLE;
     }
 
-    pub fn insert(self: &mut Table, row: &Row) -> usize {
-        {
-            let row_index = self.num_rows;
-            let (page, pos) = self.row_slot_for_write(row_index);
-            Row::serialize(row, page, pos);
-        }
-        self.num_rows += 1;
-        self.num_rows
+    //TODO: select cursor should not pass a mutable table
+    pub fn select_cursor(self: &mut Table) -> Cursor {
+        Cursor::new(self, -1)
     }
 
-    pub fn get_row(self: &mut Table, row_index: usize) -> Row {
-        let (page, pos) = self.row_slot_for_read(row_index);
-        Row::deserialize(page, pos)
-    }
-
-    fn row_slot_for_write(self: &mut Table, row_index: usize) -> (&mut Page, usize) {
-        let page_index = row_index / ROWS_PER_PAGE;
-        let page = self.pager.page_for_write(page_index);
-        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
-    }
-
-    fn row_slot_for_read(self: &mut Table, row_index: usize) -> (&Page, usize) {
-        let page_index = row_index / ROWS_PER_PAGE;
-        let page = self.pager.page_for_read(page_index);
-        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
+    pub fn insert_cursor(self: &mut Table) -> Cursor {
+        let row_index = self.num_rows as isize;
+        Cursor::new(self, row_index)
     }
 }
 
@@ -177,6 +160,7 @@ impl Pager {
         self.pages[page_index] = Some(buf);
     }
 
+    // TODO: retreiving of a readable page should not pass a mutable pager
     fn page_for_read(self: &mut Pager, page_index: usize) -> &Page {
         if page_index >= self.num_pages {
             panic!("read EOF");
@@ -198,5 +182,53 @@ impl Pager {
             self.load(page_index);
         }
         self.pages[page_index].as_mut().unwrap()
+    }
+}
+
+pub struct Cursor<'a> {
+    table: &'a mut Table,
+    curr_index: isize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(table: &'a mut Table, row_index: isize) -> Cursor<'a> {
+        Cursor {
+            table: table,
+            curr_index: row_index,
+        }
+    }
+
+    pub fn has_next_row(self: &Cursor<'a>) -> bool {
+        (self.curr_index + 1) < self.table.num_rows as isize
+    }
+
+    pub fn next_row(self: &mut Cursor<'a>) {
+        self.curr_index += 1;
+    }
+
+    pub fn get(self: &mut Cursor<'a>) -> Row {
+        let row_index = self.curr_index as usize;
+        let (page, pos) = Cursor::row_slot_for_read(self.table, row_index);
+        Row::deserialize(page, pos)
+    }
+
+    pub fn save(self: &mut Cursor<'a>, row: &Row) {
+        {
+            let (page, pos) = Cursor::row_slot_for_write(self.table, self.curr_index as usize);
+            Row::serialize(row, page, pos);
+        }
+        self.table.num_rows += 1;
+    }
+
+    fn row_slot_for_write(table: &mut Table, row_index: usize) -> (&mut Page, usize) {
+        let page_index = row_index / ROWS_PER_PAGE;
+        let page = table.pager.page_for_write(page_index);
+        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
+    }
+
+    fn row_slot_for_read(table: &mut Table, row_index: usize) -> (&Page, usize) {
+        let page_index = row_index / ROWS_PER_PAGE;
+        let page = table.pager.page_for_read(page_index);
+        return (page, ROW_SIZE * (row_index % ROWS_PER_PAGE));
     }
 }
