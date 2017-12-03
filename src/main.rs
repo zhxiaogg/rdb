@@ -118,10 +118,10 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
     match statement.kind {
         StatementType::SELECT => {
             let mut cursor = table.select_cursor();
-            while cursor.has_next_row() {
-                cursor.next_row();
+            while !cursor.end_of_table() {
                 let row = cursor.get();
                 println!("({}, {}, {})", row.id, &row.username, &row.email);
+                cursor.advance();
             }
             ExecuteResult::Ok
         }

@@ -111,11 +111,11 @@ impl Table {
 
     //TODO: select cursor should not pass a mutable table
     pub fn select_cursor(self: &mut Table) -> Cursor {
-        Cursor::new(self, -1)
+        Cursor::new(self, 0)
     }
 
     pub fn insert_cursor(self: &mut Table) -> Cursor {
-        let row_index = self.num_rows as isize;
+        let row_index = self.num_rows;
         Cursor::new(self, row_index)
     }
 }
@@ -187,34 +187,34 @@ impl Pager {
 
 pub struct Cursor<'a> {
     table: &'a mut Table,
-    curr_index: isize,
+    curr_index: usize,
 }
 
 impl<'a> Cursor<'a> {
-    fn new(table: &'a mut Table, row_index: isize) -> Cursor<'a> {
+    fn new(table: &'a mut Table, row_index: usize) -> Cursor<'a> {
         Cursor {
             table: table,
             curr_index: row_index,
         }
     }
 
-    pub fn has_next_row(self: &Cursor<'a>) -> bool {
-        (self.curr_index + 1) < self.table.num_rows as isize
+    pub fn end_of_table(self: &Cursor<'a>) -> bool {
+        self.curr_index >= self.table.num_rows
     }
 
-    pub fn next_row(self: &mut Cursor<'a>) {
+    pub fn advance(self: &mut Cursor<'a>) {
         self.curr_index += 1;
     }
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
-        let row_index = self.curr_index as usize;
+        let row_index = self.curr_index;
         let (page, pos) = Cursor::row_slot_for_read(self.table, row_index);
         Row::deserialize(page, pos)
     }
 
     pub fn save(self: &mut Cursor<'a>, row: &Row) {
         {
-            let (page, pos) = Cursor::row_slot_for_write(self.table, self.curr_index as usize);
+            let (page, pos) = Cursor::row_slot_for_write(self.table, self.curr_index);
             Row::serialize(row, page, pos);
         }
         self.table.num_rows += 1;
