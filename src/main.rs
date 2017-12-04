@@ -8,7 +8,7 @@ use std::env;
 mod table;
 mod pager;
 
-use table::{Table, Row};
+use table::{Row, Table};
 
 fn main() {
     let db = if let Some(file) = env::args().nth(1) {
@@ -29,23 +29,17 @@ fn main() {
         if input_buffer.starts_with(".") {
             match do_meta_command(&input_buffer.trim(), &mut table) {
                 ExecuteResult::Ok => {}
-                ExecuteResult::Err(msg) => {
-                    println!("{}", &msg);
-                }
+                ExecuteResult::Err(msg) => println!("{}", &msg),
             }
             continue;
         }
 
         match prepare_statement(&input_buffer.trim()) {
-            PrepareResult::Ok(statement) => {
-                match execute_statement(&statement, &mut table) {
-                    ExecuteResult::Ok => println!("Executed."),
-                    ExecuteResult::Err(msg) => println!("{}", &msg),
-                }
-            }
-            PrepareResult::Err(msg) => {
-                println!("{}", &msg);
-            }
+            PrepareResult::Ok(statement) => match execute_statement(&statement, &mut table) {
+                ExecuteResult::Ok => println!("Executed."),
+                ExecuteResult::Err(msg) => println!("{}", &msg),
+            },
+            PrepareResult::Err(msg) => println!("{}", &msg),
         }
     }
 }
@@ -93,7 +87,6 @@ fn prepare_statement(input_buffer: &str) -> PrepareResult {
             row_to_insert: None,
         })
     } else if input_buffer.starts_with("insert") {
-
         let parts: Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
         if parts.len() != 4 {
             PrepareResult::Err(input_buffer.to_owned())
@@ -137,9 +130,11 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
             if table.is_full() {
                 ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
-                let mut cursor = table.insert_cursor(r.id);
-                match cursor.save(r.id, r) {
-                    Result::Ok(()) =>                 ExecuteResult::Ok,
+                match table.insert_cursor(r.id) {
+                    Result::Ok(mut cursor) => match cursor.save(r.id, r) {
+                        Result::Ok(()) => ExecuteResult::Ok,
+                        Result::Err(msg) => ExecuteResult::Err(msg),
+                    },
                     Result::Err(msg) => ExecuteResult::Err(msg),
                 }
             } else {
@@ -156,7 +151,7 @@ fn print_prompt() {
 
 fn read_input(input_buffer: &mut String) {
     input_buffer.clear();
-    io::stdin().read_line(input_buffer).expect(
-        "read input error.",
-    );
+    io::stdin()
+        .read_line(input_buffer)
+        .expect("read input error.");
 }
