@@ -29,9 +29,7 @@ fn main() {
         if input_buffer.starts_with(".") {
             match do_meta_command(&input_buffer.trim(), &mut table) {
                 ExecuteResult::Ok => {}
-                ExecuteResult::Err(msg) => {
-                    println!("{}", &msg);
-                }
+                ExecuteResult::Err(msg) => println!("{}", &msg),
             }
             continue;
         }
@@ -41,9 +39,7 @@ fn main() {
                 ExecuteResult::Ok => println!("Executed."),
                 ExecuteResult::Err(msg) => println!("{}", &msg),
             },
-            PrepareResult::Err(msg) => {
-                println!("{}", &msg);
-            }
+            PrepareResult::Err(msg) => println!("{}", &msg),
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
 
-use pager::{LeafPage, Page, Pager, KEY_SIZE, ROW_SIZE};
+use pager::{LeafPage, Page, PageTrait, Pager, KEY_SIZE, ROW_SIZE};
 
 pub struct Row {
     pub id: u32,
@@ -142,7 +142,7 @@ impl<'a> Cursor<'a> {
 
     pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
         self.table.pager.num_pages == 0
-            || (self.cell_index >= self.page_for_read().num_cells() as usize)
+            || (self.cell_index >= self.page_for_read().get_num_cells() as usize)
     }
 
     pub fn advance(self: &mut Cursor<'a>) {

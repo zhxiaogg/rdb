@@ -16,9 +16,10 @@ const PARENT_POINTER_OFFSET: usize = 2;
 const PARENT_POINTER_SIZE: usize = 4;
 const COMMON_NODE_HEADER_SIZE: usize = PAGE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
 
-// for leaf page layout:
 const NUM_CELLS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const NUM_CELLS_SIZE: usize = 4;
+
+// for leaf page layout:
 const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE;
 
 const CELL_OFFSET: usize = LEAF_NODE_HEADER_SIZE;
@@ -29,9 +30,7 @@ const LEAF_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
 pub const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
 
 // for internal page layout:
-const NUM_KEYS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
-const NUM_KEYS_SIZE: usize = 4;
-const RIGH_PAGE_INDEX_OFFSET: usize = NUM_KEYS_OFFSET + NUM_KEYS_SIZE;
+const RIGH_PAGE_INDEX_OFFSET: usize = NUM_CELLS_OFFSET + NUM_CELLS_SIZE;
 const RIGHT_PAGE_INDEX_SIZE: usize = 4;
 const INTERNAL_NODE_HEADER_SIZE: usize = RIGH_PAGE_INDEX_OFFSET + RIGHT_PAGE_INDEX_SIZE;
 const KEY_INDEX_OFFSET: usize = INTERNAL_NODE_HEADER_SIZE;
@@ -77,9 +76,15 @@ impl From<u8> for PageType {
 }
 
 pub type Page = Vec<u8>;
+const RANGE_FOR_NUM_CELLS: RangeFrom<usize> = RangeFrom {
+    start: NUM_CELLS_OFFSET,
+};
+const RANGE_FOR_PARENT_INDEX: RangeFrom<usize> = RangeFrom {
+    start: PARENT_POINTER_OFFSET,
+};
 
 pub trait PageTrait {
-    fn page_type(&self) -> PageType;
+    fn get_page_type(&self) -> PageType;
 
     fn set_page_type(&mut self, page_type: PageType);
 
@@ -94,6 +99,10 @@ pub trait PageTrait {
     fn is_root(&self) -> bool;
 
     fn set_is_root(&mut self, is_root: bool);
+
+    fn get_num_cells(&self) -> u32;
+
+    fn set_num_cells(&mut self, num_cells: u32);
 }
 
 //TODO: update num cells using `usize`
@@ -102,20 +111,12 @@ pub trait LeafPage {
 
     fn pos_for_cell(cell_index: usize) -> usize;
 
-    fn num_cells(&self) -> u32;
-
     fn key_for_cell(&self, cell_index: usize) -> u32;
-
-    fn set_num_cells(&mut self, num_cells: u32);
 
     fn cell_for_key(&self, key: u32) -> usize;
 }
 
 pub trait InternalPage {
-    fn set_num_keys(&mut self, num: usize);
-
-    fn num_keys(&self) -> usize;
-
     fn set_key(&mut self, index: usize, key: u32);
 
     fn get_key(&self, index: usize) -> u32;
@@ -128,7 +129,7 @@ pub trait InternalPage {
 }
 
 impl PageTrait for Page {
-    fn page_type(&self) -> PageType {
+    fn get_page_type(&self) -> PageType {
         let v = self[PAGE_TYPE_OFFSET];
         PageType::from(v)
     }
@@ -162,18 +163,11 @@ impl PageTrait for Page {
     }
 
     fn set_parent_page_index(&mut self, page_index: usize) {
-        BigEndian::write_u32(
-            self.index_mut(RangeFrom {
-                start: PARENT_POINTER_OFFSET,
-            }),
-            page_index as u32,
-        );
+        BigEndian::write_u32(self.index_mut(RANGE_FOR_PARENT_INDEX), page_index as u32);
     }
 
     fn get_parent_page_index(&self) -> usize {
-        BigEndian::read_u32(self.index(RangeFrom {
-            start: PARENT_POINTER_OFFSET,
-        })) as usize
+        BigEndian::read_u32(self.index(RANGE_FOR_PARENT_INDEX)) as usize
     }
 
     fn is_root(&self) -> bool {
@@ -182,6 +176,22 @@ impl PageTrait for Page {
 
     fn set_is_root(&mut self, is_root: bool) {
         self[IS_ROOT_OFFSET] = if is_root { 1u8 } else { 0u8 };
+    }
+
+    fn get_num_cells(&self) -> u32 {
+        BigEndian::read_u32(self.index(RANGE_FOR_NUM_CELLS))
+    }
+
+    fn set_num_cells(&mut self, num_cells: u32) {
+        let max_num_cells = match self.get_page_type() {
+            PageType::Leaf => LEAF_NODE_MAX_CELLS,
+            PageType::Internal => INTERNAL_NODE_MAX_CELLS,
+        };
+        if (num_cells as usize) > max_num_cells {
+            panic!("max number of cells exceeded!");
+        }
+
+        BigEndian::write_u32(self.index_mut(RANGE_FOR_NUM_CELLS), num_cells)
     }
 }
 
@@ -198,34 +208,16 @@ impl LeafPage for Page {
         CELL_OFFSET + cell_index * LEAF_NODE_CELL_SIZE
     }
 
-    fn num_cells(self: &Page) -> u32 {
-        BigEndian::read_u32(self.index(RangeFrom {
-            start: NUM_CELLS_OFFSET,
-        }))
-    }
-
     fn key_for_cell(self: &Page, cell_index: usize) -> u32 {
-        if cell_index >= self.num_cells() as usize {
+        if cell_index >= self.get_num_cells() as usize {
             panic!("invalid cell index!");
         }
         let pos = Page::pos_for_cell(cell_index);
         BigEndian::read_u32(self.index(RangeFrom { start: pos }))
     }
 
-    fn set_num_cells(&mut self, num_cells: u32) {
-        if (num_cells as usize) > LEAF_NODE_MAX_CELLS {
-            panic!("max number of cells exceeded!");
-        }
-        BigEndian::write_u32(
-            self.index_mut(RangeFrom {
-                start: NUM_CELLS_OFFSET,
-            }),
-            num_cells,
-        )
-    }
-
     fn cell_for_key(&self, key: u32) -> usize {
-        let num_cells = self.num_cells();
+        let num_cells = self.get_num_cells();
         if num_cells == 0 {
             return 0;
         }
@@ -250,21 +242,6 @@ impl LeafPage for Page {
 }
 
 impl InternalPage for Page {
-    fn set_num_keys(&mut self, num: usize) {
-        BigEndian::write_u32(
-            self.index_mut(RangeFrom {
-                start: NUM_KEYS_OFFSET,
-            }),
-            num as u32,
-        );
-    }
-
-    fn num_keys(&self) -> usize {
-        BigEndian::read_u32(self.index(RangeFrom {
-            start: NUM_KEYS_OFFSET,
-        })) as usize
-    }
-
     fn set_key(&mut self, index: usize, key: u32) {
         BigEndian::write_u32(
             self.index_mut(RangeFrom {
@@ -332,12 +309,8 @@ impl Pager {
     pub fn find_cell(&mut self, key: u32) -> Result<(usize, usize), String> {
         let page_index = self.root_page_index;
         let page = self.page_for_read(page_index);
-        let page_type = page.page_type();
-        match page_type {
-            PageType::Leaf => {
-                let cell_index = page.cell_for_key(key);
-                Result::Ok((page_index, cell_index))
-            }
+        match page.get_page_type() {
+            PageType::Leaf => Result::Ok((page_index, page.cell_for_key(key))),
             PageType::Internal => {
                 Result::Err("Need to implement searching an internal node".to_owned())
             }
@@ -359,7 +332,7 @@ impl Pager {
             0
         } else {
             let page = self.page_for_read(page_index);
-            page.num_cells() as usize
+            page.get_num_cells() as usize
         };
 
         if num_cells >= LEAF_NODE_MAX_CELLS {
@@ -425,7 +398,7 @@ impl Pager {
                 // transform original page into root (type of Internal) page
                 let key = original_page.key_for_cell(FIRST_HALF_NUM_CELLS - 1);
                 original_page.set_page_type(PageType::Internal);
-                original_page.set_num_keys(1);
+                original_page.set_num_cells(1);
                 original_page.set_key(0, key);
                 original_page.set_page_index(0, num_pages);
                 original_page.set_page_index(1, num_pages + 1);
@@ -452,7 +425,7 @@ impl Pager {
     fn write_key(&mut self, key: u32, page_index: usize, cell_index: usize) {
         let cell_pos = Page::pos_for_cell(cell_index);
         let page = self.page_for_write(page_index);
-        let num_cells = page.num_cells();
+        let num_cells = page.get_num_cells();
         BigEndian::write_u32(page.index_mut(RangeFrom { start: cell_pos }), key);
         page.set_num_cells((num_cells + 1) as u32);
     }
@@ -507,9 +480,9 @@ impl Pager {
 
     fn debug_print_for_page(&mut self, page_index: usize, padding: &str) {
         //TODO: when page_for_read get rid of mutable ref, we should refactor the following codes.
-        match self.page_for_read(page_index).page_type() {
+        match self.page_for_read(page_index).get_page_type() {
             PageType::Leaf => {
-                let num_cells = self.page_for_read(page_index).num_cells();
+                let num_cells = self.page_for_read(page_index).get_num_cells();
                 println!("{}- leaf (size {})", padding, num_cells);
                 for cell_index in 0..(num_cells as usize) {
                     println!(
@@ -520,7 +493,7 @@ impl Pager {
                 }
             }
             PageType::Internal => {
-                let num_keys = self.page_for_read(page_index).num_keys();
+                let num_keys = self.page_for_read(page_index).get_num_cells() as usize;
                 println!("{}- internal (size {})", padding, num_keys);
                 for index in 0..num_keys {
                     let child_page_index = self.page_for_read(page_index).get_page_index(index);
