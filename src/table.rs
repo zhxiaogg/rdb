@@ -133,10 +133,16 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /**
+     * short hand for get current page
+     **/
+    fn page_for_read(&mut self) -> &Page {
+        self.table.pager.page_for_read(self.page_index)
+    }
+
     pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
-        let page_index = self.page_index;
         self.table.pager.num_pages == 0
-            || (self.cell_index >= self.table.pager.page_for_read(page_index).num_cells() as usize)
+            || (self.cell_index >= self.page_for_read().num_cells() as usize)
     }
 
     pub fn advance(self: &mut Cursor<'a>) {
@@ -145,22 +151,18 @@ impl<'a> Cursor<'a> {
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
         let cell_pos = Page::pos_for_cell(self.cell_index);
-
-        let page_index = self.page_index;
-        let page = self.table.pager.page_for_read(page_index);
-
+        let page = self.page_for_read();
         Row::deserialize(page, cell_pos + KEY_SIZE)
     }
 
     pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) -> Result<(), String> {
-        let cell_index = self.cell_index;
-        let page_index = self.page_index;
-
-        let insert_result = self.table.pager.insert_key(key, page_index, cell_index);
-        insert_result.map(|(page_index, cell_index)| {
-            let cell_pos = Page::pos_for_cell(cell_index);
-            let page = self.table.pager.page_for_write(page_index);
-            Row::serialize(row, page, cell_pos + KEY_SIZE);
-        })
+        self.table
+            .pager
+            .insert_key(key, self.page_index, self.cell_index)
+            .map(|(page_index, cell_index)| {
+                let cell_pos = Page::pos_for_cell(cell_index);
+                let page = self.table.pager.page_for_write(page_index);
+                Row::serialize(row, page, cell_pos + KEY_SIZE);
+            })
     }
 }
