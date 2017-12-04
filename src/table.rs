@@ -1,8 +1,7 @@
 use std::ops::{Range, RangeFrom, Index, IndexMut};
 use byteorder::{BigEndian, ByteOrder};
 
-use pager::{Pager, Page, LeafPage, PageTrait, ROW_SIZE, CELL_KEY_SIZE, LEAF_NODE_CELL_SIZE,
-            LEAF_NODE_MAX_CELLS};
+use pager::{Pager, Page, LeafPage, ROW_SIZE, KEY_SIZE};
 
 pub struct Row {
     pub id: u32,
@@ -93,21 +92,24 @@ impl Table {
         Cursor::new(self, page_index, 0)
     }
 
-    pub fn insert_cursor(self: &mut Table, key: u32) -> Cursor {
+    pub fn insert_cursor(self: &mut Table, key: u32) -> Result<Cursor, String> {
         if self.pager.num_pages == 0 {
-            Cursor {
+            Result::Ok(Cursor {
                 table: self,
                 page_index: 0,
                 cell_index: 0,
-            }
+            })
         } else {
             // find page for the key
-            let (page_index, cell_index) = self.pager.find_cell(key);
-            Cursor {
-                table: self,
-                page_index: page_index,
-                cell_index: cell_index,
-            }
+            self.pager.find_cell(key).map(
+                move |(page_index, cell_index)| {
+                    Cursor {
+                        table: self,
+                        page_index: page_index,
+                        cell_index: cell_index,
+                    }
+                },
+            )
         }
     }
 
@@ -147,37 +149,18 @@ impl<'a> Cursor<'a> {
         let page_index = self.page_index;
         let page = self.table.pager.page_for_read(page_index);
 
-        Row::deserialize(page, cell_pos + CELL_KEY_SIZE)
+        Row::deserialize(page, cell_pos + KEY_SIZE)
     }
 
     pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) -> Result<(), String> {
         let cell_index = self.cell_index;
-        let cell_pos = Page::pos_for_cell(cell_index);
-
         let page_index = self.page_index;
-        let page = self.table.pager.page_for_write(page_index);
 
-        let num_cells = page.num_cells() as usize;
-        if num_cells > LEAF_NODE_MAX_CELLS {
-            return Result::Err("split of leaf node not implemented!".to_owned());
-        }
-
-        if cell_index < num_cells {
-            if page.key_for_cell(cell_index) == key {
-                return Result::Err("Error: Duplicate key.".to_owned());
-            }
-            // need move existed cells
-            for cell_index in (self.cell_index..num_cells).rev() {
-                let cell_pos = Page::pos_for_cell(cell_index);
-                let new_cell_pos = cell_pos + LEAF_NODE_CELL_SIZE;
-                page.move_slice_internally(cell_pos, new_cell_pos, LEAF_NODE_CELL_SIZE);
-            }
-        }
-
-        BigEndian::write_u32(page.index_mut(RangeFrom { start: cell_pos }), key);
-        Row::serialize(row, page, cell_pos + CELL_KEY_SIZE);
-
-        page.set_num_cells((num_cells + 1) as u32);
-        Result::Ok(())
+        let insert_result = self.table.pager.insert_key(key, page_index, cell_index);
+        insert_result.map(|(page_index, cell_index)| {
+            let cell_pos = Page::pos_for_cell(cell_index);
+            let page = self.table.pager.page_for_write(page_index);
+            Row::serialize(row, page, cell_pos + KEY_SIZE);
+        })
     }
 }
