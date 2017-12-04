@@ -1,7 +1,7 @@
-use std::ops::{Range, RangeFrom, Index, IndexMut};
+use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
 
-use pager::{Pager, Page, LeafPage, ROW_SIZE, KEY_SIZE};
+use pager::{LeafPage, Page, Pager, KEY_SIZE, ROW_SIZE};
 
 pub struct Row {
     pub id: u32,
@@ -101,15 +101,15 @@ impl Table {
             })
         } else {
             // find page for the key
-            self.pager.find_cell(key).map(
-                move |(page_index, cell_index)| {
+            self.pager
+                .find_cell(key)
+                .map(move |(page_index, cell_index)| {
                     Cursor {
                         table: self,
                         page_index: page_index,
                         cell_index: cell_index,
                     }
-                },
-            )
+                })
         }
     }
 
@@ -135,8 +135,8 @@ impl<'a> Cursor<'a> {
 
     pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
         let page_index = self.page_index;
-        self.table.pager.num_pages == 0 ||
-            (self.cell_index >= self.table.pager.page_for_read(page_index).num_cells() as usize)
+        self.table.pager.num_pages == 0
+            || (self.cell_index >= self.table.pager.page_for_read(page_index).num_cells() as usize)
     }
 
     pub fn advance(self: &mut Cursor<'a>) {

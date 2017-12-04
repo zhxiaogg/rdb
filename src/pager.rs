@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Read, Write};
-use std::ops::{Range, RangeFrom, Index, IndexMut};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::ops::{Index, IndexMut, Range, RangeFrom};
 
 use byteorder::{BigEndian, ByteOrder};
 
@@ -163,13 +163,17 @@ impl PageTrait for Page {
 
     fn set_parent_page_index(&mut self, page_index: usize) {
         BigEndian::write_u32(
-            self.index_mut(RangeFrom { start: PARENT_POINTER_OFFSET }),
+            self.index_mut(RangeFrom {
+                start: PARENT_POINTER_OFFSET,
+            }),
             page_index as u32,
         );
     }
 
     fn get_parent_page_index(&self) -> usize {
-        BigEndian::read_u32(self.index(RangeFrom { start: PARENT_POINTER_OFFSET })) as usize
+        BigEndian::read_u32(self.index(RangeFrom {
+            start: PARENT_POINTER_OFFSET,
+        })) as usize
     }
 
     fn is_root(&self) -> bool {
@@ -195,7 +199,9 @@ impl LeafPage for Page {
     }
 
     fn num_cells(self: &Page) -> u32 {
-        BigEndian::read_u32(self.index(RangeFrom { start: NUM_CELLS_OFFSET }))
+        BigEndian::read_u32(self.index(RangeFrom {
+            start: NUM_CELLS_OFFSET,
+        }))
     }
 
     fn key_for_cell(self: &Page, cell_index: usize) -> u32 {
@@ -211,7 +217,9 @@ impl LeafPage for Page {
             panic!("max number of cells exceeded!");
         }
         BigEndian::write_u32(
-            self.index_mut(RangeFrom { start: NUM_CELLS_OFFSET }),
+            self.index_mut(RangeFrom {
+                start: NUM_CELLS_OFFSET,
+            }),
             num_cells,
         )
     }
@@ -244,13 +252,17 @@ impl LeafPage for Page {
 impl InternalPage for Page {
     fn set_num_keys(&mut self, num: usize) {
         BigEndian::write_u32(
-            self.index_mut(RangeFrom { start: NUM_KEYS_OFFSET }),
+            self.index_mut(RangeFrom {
+                start: NUM_KEYS_OFFSET,
+            }),
             num as u32,
         );
     }
 
     fn num_keys(&self) -> usize {
-        BigEndian::read_u32(self.index(RangeFrom { start: NUM_KEYS_OFFSET })) as usize
+        BigEndian::read_u32(self.index(RangeFrom {
+            start: NUM_KEYS_OFFSET,
+        })) as usize
     }
 
     fn set_key(&mut self, index: usize, key: u32) {
@@ -332,11 +344,11 @@ impl Pager {
         }
     }
 
-    #[doc = /**
+    /**
      * this method will insert key and return the cell position for later row serialization.
-     * the returned cell position may not be the same as the input one, due to the b+tree leaf node splitting.
-     *
-     **/]
+     * the returned cell position may not be the same as the input one, due to the
+     * b+tree leaf node splitting.
+     **/
     pub fn insert_key(
         &mut self,
         key: u32,
@@ -380,7 +392,7 @@ impl Pager {
         Result::Ok((page_index, cell_index))
     }
 
-    #[doc = /**
+    /**
      * Split a leaf page identified by given page_index.
      * If the given page is root page, then two new page will be created, and the
      * original page will be emptied and relocated. Otherwise only one new page will
@@ -389,9 +401,8 @@ impl Pager {
      * the newly created page index.
      * TODO: bytes move not efficient!
      * TODO: consider not return the newly created page index, and let the caller search again?
-     **/]
+     **/
     fn split_leaf_page(&mut self, page_index: usize) -> (Option<usize>, usize) {
-
         let mut second_half_buf = vec![0u8; SECOND_HALF_PAGE_SIZE];
         let mut first_half_buf: Option<Vec<u8>> = None;
         let mut relocated_page_index = None;
