@@ -82,6 +82,20 @@ const RANGE_FOR_NUM_CELLS: RangeFrom<usize> = RangeFrom {
 const RANGE_FOR_PARENT_INDEX: RangeFrom<usize> = RangeFrom {
     start: PARENT_POINTER_OFFSET,
 };
+const RANGE_FOR_RIGHT_PAGE_INDEX: RangeFrom<usize> = RangeFrom {
+    start: RIGH_PAGE_INDEX_OFFSET,
+};
+fn range_for_internal_page_key(index: usize) -> RangeFrom<usize> {
+    RangeFrom {
+        start: KEY_INDEX_OFFSET + INDEX_SIZE + index * INTERNAL_NODE_CELL_SIZE,
+    }
+}
+
+fn range_for_internal_page_index(index: uszie) -> RangeFrom<usize> {
+    RangeFrom {
+        start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
+    }
+}
 
 pub trait PageTrait {
     fn get_page_type(&self) -> PageType;
@@ -243,33 +257,30 @@ impl LeafPage for Page {
 
 impl InternalPage for Page {
     fn set_key(&mut self, index: usize, key: u32) {
-        BigEndian::write_u32(
-            self.index_mut(RangeFrom {
-                start: KEY_INDEX_OFFSET + INDEX_SIZE + index * INTERNAL_NODE_CELL_SIZE,
-            }),
-            key,
-        );
+        if index == INTERNAL_NODE_MAX_CELLS {
+            BigEndian::write_u32(self.index_mut(RANGE_FOR_RIGHT_PAGE_INDEX), key);
+        } else {
+            BigEndian::write_u32(self.index_mut(range_for_internal_page_key(index)), key);
+        }
     }
 
     fn get_key(&self, index: usize) -> u32 {
-        BigEndian::read_u32(self.index(RangeFrom {
-            start: KEY_INDEX_OFFSET + INDEX_SIZE + index * INTERNAL_NODE_CELL_SIZE,
-        }))
+        if index == INTERNAL_NODE_MAX_CELLS {
+            BigEndian::read_u32(self.index(RANGE_FOR_RIGHT_PAGE_INDEX))
+        } else {
+            BigEndian::read_u32(self.index(range_for_internal_page_key(index)))
+        }
     }
 
     fn set_page_index(&mut self, index: usize, page_index: usize) {
         BigEndian::write_u32(
-            self.index_mut(RangeFrom {
-                start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
-            }),
+            self.index_mut(range_for_internal_page_index(index)),
             page_index as u32,
         )
     }
 
     fn get_page_index(&self, index: usize) -> usize {
-        BigEndian::read_u32(self.index(RangeFrom {
-            start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
-        })) as usize
+        BigEndian::read_u32(self.index(range_for_internal_page_index(index))) as usize
     }
 }
 
