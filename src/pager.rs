@@ -240,7 +240,7 @@ impl LeafPage for Page {
         CELL_OFFSET + cell_index * LEAF_NODE_CELL_SIZE
     }
 
-    fn key_for_cell(self: &Page, cell_index: usize) -> u32 {
+    fn key_for_cell(&self, cell_index: usize) -> u32 {
         if cell_index >= self.get_num_cells() as usize {
             panic!("invalid cell index!");
         }
@@ -363,15 +363,10 @@ impl Pager {
     }
 
     fn search_key_in_page(&self, key: u32, page_index: usize) -> (usize, usize) {
-        let mut index = page_index;
-        loop {
-            let page = self.page_for_read(index);
-            match page.get_page_type() {
-                PageType::Leaf => return (index, page.find_cell_for_key(key)),
-                PageType::Internal => {
-                    index = page.find_page_for_key(key);
-                }
-            }
+        let page = self.page_for_read(page_index);
+        match page.get_page_type() {
+            PageType::Leaf => (page_index, page.find_cell_for_key(key)),
+            PageType::Internal => self.search_key_in_page(key, page.find_page_for_key(key)),
         }
     }
 
@@ -386,11 +381,9 @@ impl Pager {
         page_index: usize,
         cell_index: usize,
     ) -> Result<(usize, usize), String> {
-        let num_cells = if self.num_pages == 0 {
-            0
-        } else {
-            let page = self.page_for_read(page_index);
-            page.get_num_cells() as usize
+        let num_cells = match self.num_pages {
+            0 => 0,
+            _ => self.page_for_read(page_index).get_num_cells() as usize,
         };
 
         if num_cells >= LEAF_NODE_MAX_CELLS {
@@ -541,7 +534,7 @@ impl Pager {
     }
 
     // this method is designed for dev or test purpose only.
-    pub fn debug_print(&mut self) {
+    pub fn debug_print(&self) {
         println!("Tree:");
         if self.num_pages > 0 {
             self.debug_print_for_page(0, "");

@@ -97,7 +97,7 @@ impl Table {
         UpdateCursor::new(self, page_index, cell_index)
     }
 
-    pub fn debug_print(&mut self) {
+    pub fn debug_print(&self) {
         self.pager.debug_print();
     }
 }
