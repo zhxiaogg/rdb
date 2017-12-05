@@ -20,7 +20,9 @@ const NUM_CELLS_OFFSET: usize = COMMON_NODE_HEADER_SIZE;
 const NUM_CELLS_SIZE: usize = 4;
 
 // for leaf page layout:
-const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE;
+const NEXT_PAGE_OFFSET: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE;
+const NEXT_PAGE_SIZE: usize = 4;
+const LEAF_NODE_HEADER_SIZE: usize = COMMON_NODE_HEADER_SIZE + NUM_CELLS_SIZE + NEXT_PAGE_SIZE;
 
 const CELL_OFFSET: usize = LEAF_NODE_HEADER_SIZE;
 pub const KEY_SIZE: usize = 4;
@@ -32,6 +34,7 @@ pub const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CEL
 // for internal page layout:
 const RIGH_PAGE_INDEX_OFFSET: usize = NUM_CELLS_OFFSET + NUM_CELLS_SIZE;
 const RIGHT_PAGE_INDEX_SIZE: usize = 4;
+
 const INTERNAL_NODE_HEADER_SIZE: usize = RIGH_PAGE_INDEX_OFFSET + RIGHT_PAGE_INDEX_SIZE;
 const KEY_INDEX_OFFSET: usize = INTERNAL_NODE_HEADER_SIZE;
 const INDEX_SIZE: usize = 4;
@@ -45,7 +48,7 @@ const SECOND_HALF_NUM_CELLS: usize = LEAF_NODE_MAX_CELLS - FIRST_HALF_NUM_CELLS;
 const FIRST_HALF_PAGE_SIZE: usize = FIRST_HALF_NUM_CELLS * LEAF_NODE_CELL_SIZE;
 const SECOND_HALF_CELLS_OFFSET: usize = CELL_OFFSET + FIRST_HALF_PAGE_SIZE;
 const SECOND_HALF_PAGE_SIZE: usize = SECOND_HALF_NUM_CELLS * LEAF_NODE_CELL_SIZE;
-const CELL_END_OFFSET: usize = CELL_OFFSET + LEAF_NODE_MAX_CELLS * LEAF_NODE_CELL_SIZE;
+// const CELL_END_OFFSET: usize = CELL_OFFSET + LEAF_NODE_MAX_CELLS * LEAF_NODE_CELL_SIZE;
 
 // TODO: find a better place for this method
 pub fn print_constants() {
@@ -82,9 +85,11 @@ const RANGE_FOR_NUM_CELLS: RangeFrom<usize> = RangeFrom {
 const RANGE_FOR_PARENT_INDEX: RangeFrom<usize> = RangeFrom {
     start: PARENT_POINTER_OFFSET,
 };
-const RANGE_FOR_RIGHT_PAGE_INDEX: RangeFrom<usize> = RangeFrom {
-    start: RIGH_PAGE_INDEX_OFFSET,
+const RANGE_FOR_NEXT_PAGE: RangeFrom<usize> = RangeFrom {
+    start: NEXT_PAGE_OFFSET,
 };
+
+
 fn range_for_internal_page_key(index: usize) -> RangeFrom<usize> {
     RangeFrom {
         start: KEY_INDEX_OFFSET + INDEX_SIZE + index * INTERNAL_NODE_CELL_SIZE,
@@ -92,8 +97,14 @@ fn range_for_internal_page_key(index: usize) -> RangeFrom<usize> {
 }
 
 fn range_for_internal_page_index(index: usize) -> RangeFrom<usize> {
-    RangeFrom {
-        start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
+    if index == INTERNAL_NODE_MAX_CELLS {
+        RangeFrom {
+            start: RIGH_PAGE_INDEX_OFFSET,
+        }
+    } else {
+        RangeFrom {
+            start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
+        }
     }
 }
 
@@ -128,6 +139,12 @@ pub trait LeafPage {
     fn key_for_cell(&self, cell_index: usize) -> u32;
 
     fn find_cell_for_key(&self, key: u32) -> usize;
+
+    fn get_next_page(&self) -> usize;
+
+    fn set_next_page(&mut self, next_page_index: usize);
+
+    fn has_next_page(&self) -> bool;
 }
 
 pub trait InternalPage {
@@ -253,23 +270,27 @@ impl LeafPage for Page {
         }
         return index;
     }
+
+    fn get_next_page(&self) -> usize {
+        BigEndian::read_u32(self.index(RANGE_FOR_NEXT_PAGE)) as usize
+    }
+
+    fn set_next_page(&mut self, next_page_index: usize) {
+        BigEndian::write_u32(self.index_mut(RANGE_FOR_NEXT_PAGE), next_page_index as u32)
+    }
+
+    fn has_next_page(&self) -> bool {
+        self.get_next_page() != 0
+    }
 }
 
 impl InternalPage for Page {
     fn set_key(&mut self, index: usize, key: u32) {
-        if index == INTERNAL_NODE_MAX_CELLS {
-            BigEndian::write_u32(self.index_mut(RANGE_FOR_RIGHT_PAGE_INDEX), key);
-        } else {
-            BigEndian::write_u32(self.index_mut(range_for_internal_page_key(index)), key);
-        }
+        BigEndian::write_u32(self.index_mut(range_for_internal_page_key(index)), key)
     }
 
     fn get_key(&self, index: usize) -> u32 {
-        if index == INTERNAL_NODE_MAX_CELLS {
-            BigEndian::read_u32(self.index(RANGE_FOR_RIGHT_PAGE_INDEX))
-        } else {
-            BigEndian::read_u32(self.index(range_for_internal_page_key(index)))
-        }
+        BigEndian::read_u32(self.index(range_for_internal_page_key(index)))
     }
 
     fn set_page_index(&mut self, index: usize, page_index: usize) {
@@ -332,10 +353,6 @@ impl Pager {
         }
     }
 
-    pub fn root_page_index(&self) -> usize {
-        self.root_page_index
-    }
-
     pub fn find_cell(&mut self, key: u32) -> (usize, usize) {
         if self.num_pages == 0 {
             (0, 0)
@@ -351,7 +368,7 @@ impl Pager {
             let page = self.page_for_read(index);
             match page.get_page_type() {
                 PageType::Leaf => {
-                    return (page_index, page.find_cell_for_key(key));
+                    return (index, page.find_cell_for_key(key));
                 }
                 PageType::Internal => {
                     index = page.find_page_for_key(key);
@@ -445,7 +462,10 @@ impl Pager {
                 original_page.set_key(0, key);
                 original_page.set_page_index(0, num_pages);
                 original_page.set_page_index(1, num_pages + 1);
-            } // TODO: else, we should update/split it's parent and all ways up to root node
+            } else {
+                // TODO: we should update/split it's parent and all ways up to root node
+                original_page.set_next_page(num_pages);
+            }
         }
         if let Some(buf) = first_half_buf {
             // relocate the original page to a new page
@@ -455,6 +475,7 @@ impl Pager {
             let relocated_page = self.page_for_write(num_pages);
             relocated_page.wrap_slice(CELL_OFFSET, &buf);
             relocated_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
+            relocated_page.set_next_page(num_pages + 1);
         }
 
         // copy second half of page data into new page
@@ -462,6 +483,7 @@ impl Pager {
         let new_page = self.page_for_write(new_page_index);
         new_page.wrap_slice(CELL_OFFSET, &second_half_buf);
         new_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
+        new_page.set_next_page(0);
         (relocated_page_index, new_page_index)
     }
 
