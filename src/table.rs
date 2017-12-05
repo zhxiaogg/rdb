@@ -1,5 +1,6 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
+use std::cell::Ref;
 
 use pager::{LeafPage, Page, PageTrait, Pager, KEY_SIZE, ROW_SIZE};
 
@@ -120,7 +121,7 @@ impl<'a> Cursor<'a> {
     /**
      * short hand for get current page
      **/
-    fn page_for_read(&mut self) -> &Page {
+    fn page_for_read(&self) -> Ref<Page> {
         self.table.pager.page_for_read(self.page_index)
     }
 
@@ -142,8 +143,7 @@ impl<'a> Cursor<'a> {
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
         let cell_pos = Page::pos_for_cell(self.cell_index);
-        let page = self.page_for_read();
-        Row::deserialize(page, cell_pos + KEY_SIZE)
+        Row::deserialize(&self.page_for_read(), cell_pos + KEY_SIZE)
     }
 
     pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) -> Result<(), String> {
@@ -152,7 +152,7 @@ impl<'a> Cursor<'a> {
             .insert_key(key, self.page_index, self.cell_index)
             .map(|(page_index, cell_index)| {
                 let cell_pos = Page::pos_for_cell(cell_index);
-                let page = self.table.pager.page_for_write(page_index);
+                let page = &mut self.table.pager.page_for_write(page_index);
                 Row::serialize(row, page, cell_pos + KEY_SIZE);
             })
     }

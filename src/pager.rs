@@ -1,6 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::{Index, IndexMut, Range, RangeFrom};
+use std::cell::{Ref, RefCell, RefMut};
 
 use byteorder::{BigEndian, ByteOrder};
 
@@ -325,8 +326,8 @@ impl InternalPage for Page {
 }
 
 pub struct Pager {
-    file: File,
-    pages: Vec<Option<Page>>,
+    file: RefCell<File>,
+    pages: RefCell<Vec<Option<Page>>>,
     pub num_pages: usize,
     root_page_index: usize,
 }
@@ -346,8 +347,8 @@ impl Pager {
         let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
         let pages = vec![None; MAX_PAGE_PER_TABLE];
         Pager {
-            file: file,
-            pages: pages,
+            file: RefCell::new(file),
+            pages: RefCell::new(pages),
             num_pages: num_pages,
             root_page_index: 0,
         }
@@ -409,7 +410,7 @@ impl Pager {
             }
             return self.insert_key(key, real_page_index, real_cell_index);
         } else if cell_index < num_cells {
-            let page = self.page_for_write(page_index);
+            let mut page = self.page_for_write(page_index);
             if page.key_for_cell(cell_index) == key {
                 return Result::Err("Error: Duplicate key.".to_owned());
             }
@@ -441,7 +442,7 @@ impl Pager {
         let mut relocated_page_index = None;
         {
             let num_pages = self.num_pages;
-            let original_page = self.page_for_write(page_index);
+            let mut original_page = self.page_for_write(page_index);
             second_half_buf.clone_from_slice(original_page.index(Range {
                 start: SECOND_HALF_CELLS_OFFSET,
                 end: SECOND_HALF_CELLS_OFFSET + SECOND_HALF_PAGE_SIZE,
@@ -472,7 +473,7 @@ impl Pager {
             // and copy first half of original page data into the new page
             let num_pages = self.num_pages;
             relocated_page_index = Some(num_pages);
-            let relocated_page = self.page_for_write(num_pages);
+            let mut relocated_page = self.page_for_write(num_pages);
             relocated_page.wrap_slice(CELL_OFFSET, &buf);
             relocated_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
             relocated_page.set_next_page(num_pages + 1);
@@ -480,7 +481,7 @@ impl Pager {
 
         // copy second half of page data into new page
         let new_page_index = self.num_pages;
-        let new_page = self.page_for_write(new_page_index);
+        let mut new_page = self.page_for_write(new_page_index);
         new_page.wrap_slice(CELL_OFFSET, &second_half_buf);
         new_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
         new_page.set_next_page(0);
@@ -489,7 +490,7 @@ impl Pager {
 
     fn write_key(&mut self, key: u32, page_index: usize, cell_index: usize) {
         let cell_pos = Page::pos_for_cell(cell_index);
-        let page = self.page_for_write(page_index);
+        let mut page = self.page_for_write(page_index);
         let num_cells = page.get_num_cells();
         BigEndian::write_u32(page.index_mut(RangeFrom { start: cell_pos }), key);
         page.set_num_cells((num_cells + 1) as u32);
@@ -497,42 +498,49 @@ impl Pager {
 
     pub fn flush(self: &mut Pager, page_index: usize) {
         let offset = page_index * PAGE_SIZE;
-        if let Some(page) = self.pages[page_index].as_ref() {
-            self.file.seek(SeekFrom::Start(offset as u64)).unwrap();
-            self.file.write_all(page.as_ref()).unwrap();
+        if let Some(page) = self.pages.borrow()[page_index].as_ref() {
+            let mut file = self.file.borrow_mut();
+            file.seek(SeekFrom::Start(offset as u64)).unwrap();
+            file.write_all(page.as_ref()).unwrap();
         }
     }
 
-    fn load(self: &mut Pager, page_index: usize) {
+    fn load(&self, page_index: usize) {
         let offset = page_index * PAGE_SIZE;
-        self.file.seek(SeekFrom::Start(offset as u64)).unwrap();
         let mut buf = vec![0; PAGE_SIZE];
-        self.file.read(buf.as_mut_slice()).unwrap();
-        self.pages[page_index] = Some(buf);
+
+        let mut file = self.file.borrow_mut();
+        file.seek(SeekFrom::Start(offset as u64)).unwrap();
+        file.read(buf.as_mut_slice()).unwrap();
+
+        self.pages.borrow_mut()[page_index] = Some(buf);
     }
 
-    // TODO: retreiving of a readable page should not pass a mutable pager
-    pub fn page_for_read(self: &mut Pager, page_index: usize) -> &Page {
+    pub fn page_for_read(self: &Pager, page_index: usize) -> Ref<Page> {
         if page_index >= self.num_pages {
             panic!("read EOF");
-        } else if let None = self.pages[page_index] {
+        } else if self.pages.borrow()[page_index].is_none() {
             self.load(page_index);
         }
-        self.pages[page_index].as_ref().unwrap()
+        Ref::map(self.pages.borrow(), |pages| {
+            pages[page_index].as_ref().unwrap()
+        })
     }
 
-    pub fn page_for_write(self: &mut Pager, page_index: usize) -> &mut Page {
+    pub fn page_for_write(self: &mut Pager, page_index: usize) -> RefMut<Page> {
         if page_index > self.num_pages {
             panic!("skipped write to a page");
         } else if page_index == self.num_pages {
             // need a new page
-            self.pages[page_index] = Some(Page::new_leaf_page(page_index == 0));
+            self.pages.borrow_mut()[page_index] = Some(Page::new_leaf_page(page_index == 0));
             self.num_pages += 1;
-        } else if let None = self.pages[page_index] {
+        } else if self.pages.borrow()[page_index].is_none() {
             // load page from file
             self.load(page_index);
         }
-        self.pages[page_index].as_mut().unwrap()
+        RefMut::map(self.pages.borrow_mut(), |pages| {
+            pages[page_index].as_mut().unwrap()
+        })
     }
 
     // this method is designed for dev or test purpose only.
@@ -543,32 +551,28 @@ impl Pager {
         }
     }
 
-    fn debug_print_for_page(&mut self, page_index: usize, padding: &str) {
-        //TODO: when page_for_read get rid of mutable ref, we should refactor the following codes.
-        match self.page_for_read(page_index).get_page_type() {
+    fn debug_print_for_page(&self, page_index: usize, padding: &str) {
+        let page = self.page_for_read(page_index);
+        match page.get_page_type() {
             PageType::Leaf => {
-                let num_cells = self.page_for_read(page_index).get_num_cells();
+                let num_cells = page.get_num_cells();
                 println!("{}- leaf (size {})", padding, num_cells);
                 for cell_index in 0..(num_cells as usize) {
-                    println!(
-                        "{}  - {}",
-                        padding,
-                        self.page_for_read(page_index).key_for_cell(cell_index)
-                    );
+                    println!("{}  - {}", padding, page.key_for_cell(cell_index));
                 }
             }
             PageType::Internal => {
-                let num_keys = self.page_for_read(page_index).get_num_cells() as usize;
+                let num_keys = page.get_num_cells() as usize;
                 println!("{}- internal (size {})", padding, num_keys);
                 for index in 0..num_keys {
-                    let child_page_index = self.page_for_read(page_index).get_page_index(index);
+                    let child_page_index = page.get_page_index(index);
                     let key = self.page_for_read(page_index).get_key(index);
 
                     self.debug_print_for_page(child_page_index, &format!("{}  ", padding));
 
                     println!("{}- key {}", padding, key);
                 }
-                let child_page_index = self.page_for_read(page_index).get_page_index(num_keys);
+                let child_page_index = page.get_page_index(num_keys);
                 self.debug_print_for_page(child_page_index, &format!("{}  ", padding));
             }
         }
