@@ -1,5 +1,6 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
+use std::cell::Ref;
 
 use pager::{LeafPage, Page, PageTrait, Pager, KEY_SIZE, ROW_SIZE};
 
@@ -86,31 +87,30 @@ impl Table {
         return false;
     }
 
-    //TODO: select cursor should not pass a mutable table
-    pub fn select_cursor(self: &mut Table) -> Cursor {
+    pub fn select_cursor(&self) -> SelectCursor {
         let (page_index, cell_index) = self.pager.find_cell(0);
-        Cursor::new(self, page_index, cell_index)
+        SelectCursor::new(self, page_index, cell_index)
     }
 
-    pub fn insert_cursor(self: &mut Table, key: u32) -> Cursor {
+    pub fn insert_cursor(&mut self, key: u32) -> UpdateCursor {
         let (page_index, cell_index) = self.pager.find_cell(key);
-        Cursor::new(self, page_index, cell_index)
+        UpdateCursor::new(self, page_index, cell_index)
     }
 
-    pub fn debug_print(&mut self) {
+    pub fn debug_print(&self) {
         self.pager.debug_print();
     }
 }
 
-pub struct Cursor<'a> {
-    table: &'a mut Table,
+pub struct SelectCursor<'a> {
+    table: &'a Table,
     page_index: usize,
     cell_index: usize,
 }
 
-impl<'a> Cursor<'a> {
-    fn new(table: &'a mut Table, page_index: usize, cell_index: usize) -> Cursor<'a> {
-        Cursor {
+impl<'a> SelectCursor<'a> {
+    fn new(table: &'a Table, page_index: usize, cell_index: usize) -> SelectCursor<'a> {
+        SelectCursor {
             table: table,
             page_index: page_index,
             cell_index: cell_index,
@@ -120,17 +120,17 @@ impl<'a> Cursor<'a> {
     /**
      * short hand for get current page
      **/
-    fn page_for_read(&mut self) -> &Page {
+    fn page_for_read(&self) -> Ref<Page> {
         self.table.pager.page_for_read(self.page_index)
     }
 
-    pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
+    pub fn end_of_table(&self) -> bool {
         self.table.pager.num_pages == 0
             || (self.cell_index >= (self.page_for_read().get_num_cells() as usize)
                 && self.page_for_read().get_next_page() == 0)
     }
 
-    pub fn advance(self: &mut Cursor<'a>) {
+    pub fn advance(&mut self) {
         let num_cells = self.page_for_read().get_num_cells() as usize;
         self.cell_index += 1;
         if self.cell_index >= num_cells && self.page_for_read().has_next_page() {
@@ -140,19 +140,34 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    pub fn get(self: &mut Cursor<'a>) -> Row {
+    pub fn get(&self) -> Row {
         let cell_pos = Page::pos_for_cell(self.cell_index);
-        let page = self.page_for_read();
-        Row::deserialize(page, cell_pos + KEY_SIZE)
+        Row::deserialize(&self.page_for_read(), cell_pos + KEY_SIZE)
+    }
+}
+
+pub struct UpdateCursor<'a> {
+    table: &'a mut Table,
+    page_index: usize,
+    cell_index: usize,
+}
+
+impl<'a> UpdateCursor<'a> {
+    fn new(table: &'a mut Table, page_index: usize, cell_index: usize) -> UpdateCursor<'a> {
+        UpdateCursor {
+            table: table,
+            page_index: page_index,
+            cell_index: cell_index,
+        }
     }
 
-    pub fn save(self: &mut Cursor<'a>, key: u32, row: &Row) -> Result<(), String> {
+    pub fn save(&mut self, key: u32, row: &Row) -> Result<(), String> {
         self.table
             .pager
             .insert_key(key, self.page_index, self.cell_index)
             .map(|(page_index, cell_index)| {
                 let cell_pos = Page::pos_for_cell(cell_index);
-                let page = self.table.pager.page_for_write(page_index);
+                let page = &mut self.table.pager.page_for_write(page_index);
                 Row::serialize(row, page, cell_pos + KEY_SIZE);
             })
     }
