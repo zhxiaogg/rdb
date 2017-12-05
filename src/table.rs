@@ -92,24 +92,12 @@ impl Table {
         Cursor::new(self, page_index, 0)
     }
 
-    pub fn insert_cursor(self: &mut Table, key: u32) -> Result<Cursor, String> {
-        if self.pager.num_pages == 0 {
-            Result::Ok(Cursor {
-                table: self,
-                page_index: 0,
-                cell_index: 0,
-            })
-        } else {
-            // find page for the key
-            self.pager
-                .find_cell(key)
-                .map(move |(page_index, cell_index)| {
-                    Cursor {
-                        table: self,
-                        page_index: page_index,
-                        cell_index: cell_index,
-                    }
-                })
+    pub fn insert_cursor(self: &mut Table, key: u32) -> Cursor {
+        let (page_index, cell_index) = self.pager.find_cell(key);
+        Cursor {
+            table: self,
+            page_index: page_index,
+            cell_index: cell_index,
         }
     }
 

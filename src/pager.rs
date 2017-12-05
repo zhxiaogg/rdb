@@ -91,7 +91,7 @@ fn range_for_internal_page_key(index: usize) -> RangeFrom<usize> {
     }
 }
 
-fn range_for_internal_page_index(index: uszie) -> RangeFrom<usize> {
+fn range_for_internal_page_index(index: usize) -> RangeFrom<usize> {
     RangeFrom {
         start: KEY_INDEX_OFFSET + index * INTERNAL_NODE_CELL_SIZE,
     }
@@ -127,7 +127,7 @@ pub trait LeafPage {
 
     fn key_for_cell(&self, cell_index: usize) -> u32;
 
-    fn cell_for_key(&self, key: u32) -> usize;
+    fn find_cell_for_key(&self, key: u32) -> usize;
 }
 
 pub trait InternalPage {
@@ -139,7 +139,7 @@ pub trait InternalPage {
 
     fn get_page_index(&self, index: usize) -> usize;
 
-    // fn index_by_key(&self, key: u32) -> usize;
+    fn find_page_for_key(&self, key: u32) -> usize;
 }
 
 impl PageTrait for Page {
@@ -230,7 +230,7 @@ impl LeafPage for Page {
         BigEndian::read_u32(self.index(RangeFrom { start: pos }))
     }
 
-    fn cell_for_key(&self, key: u32) -> usize {
+    fn find_cell_for_key(&self, key: u32) -> usize {
         let num_cells = self.get_num_cells();
         if num_cells == 0 {
             return 0;
@@ -282,6 +282,25 @@ impl InternalPage for Page {
     fn get_page_index(&self, index: usize) -> usize {
         BigEndian::read_u32(self.index(range_for_internal_page_index(index))) as usize
     }
+
+    fn find_page_for_key(&self, key: u32) -> usize {
+        let num_cells = self.get_num_cells() as usize;
+        let mut index = 0;
+        let mut high = num_cells;
+        while index != high {
+            let mid = (index + high) / 2;
+            let curr_key = self.get_key(mid);
+            if curr_key == key {
+                index = mid;
+                break;
+            } else if curr_key > key {
+                high = mid;
+            } else {
+                index = mid + 1;
+            }
+        }
+        self.get_page_index(index)
+    }
 }
 
 pub struct Pager {
@@ -317,13 +336,26 @@ impl Pager {
         self.root_page_index
     }
 
-    pub fn find_cell(&mut self, key: u32) -> Result<(usize, usize), String> {
-        let page_index = self.root_page_index;
-        let page = self.page_for_read(page_index);
-        match page.get_page_type() {
-            PageType::Leaf => Result::Ok((page_index, page.cell_for_key(key))),
-            PageType::Internal => {
-                Result::Err("Need to implement searching an internal node".to_owned())
+    pub fn find_cell(&mut self, key: u32) -> (usize, usize) {
+        if self.num_pages == 0 {
+            (0, 0)
+        } else {
+            let page_index = self.root_page_index;
+            self.search_key_in_page(key, page_index)
+        }
+    }
+
+    fn search_key_in_page(&mut self, key: u32, page_index: usize) -> (usize, usize) {
+        let mut index = page_index;
+        loop {
+            let page = self.page_for_read(index);
+            match page.get_page_type() {
+                PageType::Leaf => {
+                    return (page_index, page.find_cell_for_key(key));
+                }
+                PageType::Internal => {
+                    index = page.find_page_for_key(key);
+                }
             }
         }
     }
