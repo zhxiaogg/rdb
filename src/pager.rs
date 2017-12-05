@@ -354,23 +354,20 @@ impl Pager {
         }
     }
 
-    pub fn find_cell(&mut self, key: u32) -> (usize, usize) {
+    pub fn find_cell(&self, key: u32) -> (usize, usize) {
         if self.num_pages == 0 {
             (0, 0)
         } else {
-            let page_index = self.root_page_index;
-            self.search_key_in_page(key, page_index)
+            self.search_key_in_page(key, self.root_page_index)
         }
     }
 
-    fn search_key_in_page(&mut self, key: u32, page_index: usize) -> (usize, usize) {
+    fn search_key_in_page(&self, key: u32, page_index: usize) -> (usize, usize) {
         let mut index = page_index;
         loop {
             let page = self.page_for_read(index);
             match page.get_page_type() {
-                PageType::Leaf => {
-                    return (index, page.find_cell_for_key(key));
-                }
+                PageType::Leaf => return (index, page.find_cell_for_key(key)),
                 PageType::Internal => {
                     index = page.find_page_for_key(key);
                 }
@@ -566,10 +563,8 @@ impl Pager {
                 println!("{}- internal (size {})", padding, num_keys);
                 for index in 0..num_keys {
                     let child_page_index = page.get_page_index(index);
-                    let key = self.page_for_read(page_index).get_key(index);
-
+                    let key = page.get_key(index);
                     self.debug_print_for_page(child_page_index, &format!("{}  ", padding));
-
                     println!("{}- key {}", padding, key);
                 }
                 let child_page_index = page.get_page_index(num_keys);
