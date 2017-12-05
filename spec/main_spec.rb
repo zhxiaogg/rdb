@@ -194,7 +194,7 @@ describe 'database' do
       "    - 12",
       "    - 13",
       "    - 14",
-      "rdb > Need to implement searching an internal node",
+      "rdb > Executed.",
       "rdb > ",
       ])
     end
