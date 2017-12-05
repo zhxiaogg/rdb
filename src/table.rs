@@ -88,17 +88,13 @@ impl Table {
 
     //TODO: select cursor should not pass a mutable table
     pub fn select_cursor(self: &mut Table) -> Cursor {
-        let page_index = self.pager.root_page_index();
-        Cursor::new(self, page_index, 0)
+        let (page_index, cell_index) = self.pager.find_cell(0);
+        Cursor::new(self, page_index, cell_index)
     }
 
     pub fn insert_cursor(self: &mut Table, key: u32) -> Cursor {
         let (page_index, cell_index) = self.pager.find_cell(key);
-        Cursor {
-            table: self,
-            page_index: page_index,
-            cell_index: cell_index,
-        }
+        Cursor::new(self, page_index, cell_index)
     }
 
     pub fn debug_print(&mut self) {
@@ -130,11 +126,18 @@ impl<'a> Cursor<'a> {
 
     pub fn end_of_table(self: &mut Cursor<'a>) -> bool {
         self.table.pager.num_pages == 0
-            || (self.cell_index >= self.page_for_read().get_num_cells() as usize)
+            || (self.cell_index >= (self.page_for_read().get_num_cells() as usize)
+                && self.page_for_read().get_next_page() == 0)
     }
 
     pub fn advance(self: &mut Cursor<'a>) {
+        let num_cells = self.page_for_read().get_num_cells() as usize;
         self.cell_index += 1;
+        if self.cell_index >= num_cells && self.page_for_read().has_next_page() {
+            let next_page_index = self.page_for_read().get_next_page();
+            self.page_index = next_page_index;
+            self.cell_index = 0;
+        }
     }
 
     pub fn get(self: &mut Cursor<'a>) -> Row {
