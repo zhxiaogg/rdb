@@ -7,6 +7,7 @@ use std::env;
 
 mod table;
 mod pager;
+mod btree;
 
 use table::{Row, Table};
 

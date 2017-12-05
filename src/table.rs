@@ -2,7 +2,8 @@ use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
 use std::cell::Ref;
 
-use pager::{LeafPage, Page, PageTrait, Pager, KEY_SIZE, ROW_SIZE};
+use pager::{Page, Pager, KEY_SIZE, ROW_SIZE};
+use btree::{BTree, BTreeLeafPage, BTreePage};
 
 pub struct Row {
     pub id: u32,
@@ -88,12 +89,12 @@ impl Table {
     }
 
     pub fn select_cursor(&self) -> SelectCursor {
-        let (page_index, cell_index) = self.pager.find_cell(0);
+        let (page_index, cell_index) = self.pager.search_key(0);
         SelectCursor::new(self, page_index, cell_index)
     }
 
     pub fn insert_cursor(&mut self, key: u32) -> UpdateCursor {
-        let (page_index, cell_index) = self.pager.find_cell(key);
+        let (page_index, cell_index) = self.pager.search_key(key);
         UpdateCursor::new(self, page_index, cell_index)
     }
 
