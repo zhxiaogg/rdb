@@ -131,7 +131,7 @@ fn execute_statement(statement: &Statement, table: &mut Table) -> ExecuteResult 
             if table.is_full() {
                 ExecuteResult::Err("Error: Table full.".to_owned())
             } else if let Some(r) = statement.row_to_insert.as_ref() {
-                match table.insert_cursor(r.id).save(r.id, r) {
+                match table.insert_cursor(r.id).save(r) {
                     Result::Ok(()) => ExecuteResult::Ok,
                     Result::Err(msg) => ExecuteResult::Err(msg),
                 }

@@ -394,10 +394,10 @@ impl Pager {
         }
     }
 
-    fn search_key_in_page(&self, key: u32, page_index: usize) -> (usize, usize) {
+    fn search_key_in_page(&self, key: u32, page_index: usize) -> CellIndex {
         let page = self.page_for_read(page_index);
         match page.get_page_type() {
-            PageType::Leaf => (page_index, page.find_cell_for_key(key)),
+            PageType::Leaf => CellIndex::new(page_index, page.find_cell_for_key(key)),
             PageType::Internal => self.search_key_in_page(key, page.find_page_for_key(key)),
         }
     }
@@ -412,10 +412,9 @@ impl Pager {
      * TODO: bytes move not efficient!
      * TODO: consider not return the newly created page index, and let the caller search again?
      **/
-    fn split_leaf_page(&mut self, page_index: usize) -> (Option<usize>, usize) {
+    fn split_leaf_page(&mut self, page_index: usize) {
         let mut second_half_buf = vec![0u8; SECOND_HALF_PAGE_SIZE];
         let mut first_half_buf: Option<Vec<u8>> = None;
-        let mut relocated_page_index = None;
         {
             let num_pages = self.num_pages;
             let mut original_page = self.page_for_write(page_index);
@@ -448,7 +447,6 @@ impl Pager {
             // relocate the original page to a new page
             // and copy first half of original page data into the new page
             let num_pages = self.num_pages;
-            relocated_page_index = Some(num_pages);
             let mut relocated_page = self.page_for_write(num_pages);
             relocated_page.wrap_slice(CELL_OFFSET, &buf);
             relocated_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
@@ -461,7 +459,6 @@ impl Pager {
         new_page.wrap_slice(CELL_OFFSET, &second_half_buf);
         new_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
         new_page.set_next_page(0);
-        (relocated_page_index, new_page_index)
     }
 
     fn write_key(&mut self, key: u32, page_index: usize, cell_index: usize) {
@@ -473,25 +470,19 @@ impl Pager {
 }
 
 impl BTree for Pager {
-    fn search_key(&self, key: u32) -> (usize, usize) {
+    fn search_key(&self, key: u32) -> CellIndex {
         if self.num_pages == 0 {
-            (0, 0)
+            CellIndex::new(0, 0)
         } else {
             self.search_key_in_page(key, self.root_page_index)
         }
     }
 
-    /**
-     * this method will insert key and return the cell position for later row serialization.
-     * the returned cell position may not be the same as the input one, due to the
-     * b+tree leaf node splitting.
-     **/
-    fn insert_key(
-        &mut self,
-        key: u32,
-        page_index: usize,
-        cell_index: usize,
-    ) -> Result<(usize, usize), String> {
+    fn insert_key(&mut self, key: u32) -> Result<CellIndex, String> {
+        let CellIndex {
+            page_index,
+            cell_index,
+        } = self.search_key(key);
         let num_cells = match self.num_pages {
             0 => 0,
             _ => self.page_for_read(page_index).get_num_cells() as usize,
@@ -499,17 +490,8 @@ impl BTree for Pager {
 
         if num_cells >= LEAF_NODE_MAX_CELLS {
             // split page
-            let (relocated_page_index, new_page_index) = self.split_leaf_page(page_index);
-            let mut real_page_index = page_index;
-            let mut real_cell_index = cell_index;
-
-            if cell_index >= FIRST_HALF_NUM_CELLS {
-                real_page_index = new_page_index;
-                real_cell_index = cell_index - FIRST_HALF_NUM_CELLS;
-            } else if let Some(page_index) = relocated_page_index {
-                real_page_index = page_index;
-            }
-            return self.insert_key(key, real_page_index, real_cell_index);
+            self.split_leaf_page(page_index);
+            return self.insert_key(key);
         } else if cell_index < num_cells {
             let mut page = self.page_for_write(page_index);
             if page.get_key_for_cell(cell_index) == key {
@@ -524,6 +506,6 @@ impl BTree for Pager {
         }
 
         self.write_key(key, page_index, cell_index);
-        Result::Ok((page_index, cell_index))
+        Result::Ok(CellIndex::new(page_index, cell_index))
     }
 }

@@ -3,7 +3,7 @@ use byteorder::{BigEndian, ByteOrder};
 use std::cell::Ref;
 
 use pager::{Page, Pager, KEY_SIZE, ROW_SIZE};
-use btree::{BTree, BTreeLeafPage, BTreePage};
+use btree::{BTree, BTreeLeafPage, BTreePage, CellIndex};
 
 pub struct Row {
     pub id: u32,
@@ -89,13 +89,15 @@ impl Table {
     }
 
     pub fn select_cursor(&self) -> SelectCursor {
-        let (page_index, cell_index) = self.pager.search_key(0);
+        let CellIndex {
+            page_index,
+            cell_index,
+        } = self.pager.search_key(0);
         SelectCursor::new(self, page_index, cell_index)
     }
 
     pub fn insert_cursor(&mut self, key: u32) -> UpdateCursor {
-        let (page_index, cell_index) = self.pager.search_key(key);
-        UpdateCursor::new(self, page_index, cell_index)
+        UpdateCursor::new(self, key)
     }
 
     pub fn debug_print(&self) {
@@ -149,27 +151,27 @@ impl<'a> SelectCursor<'a> {
 
 pub struct UpdateCursor<'a> {
     table: &'a mut Table,
-    page_index: usize,
-    cell_index: usize,
+    key: u32,
 }
 
 impl<'a> UpdateCursor<'a> {
-    fn new(table: &'a mut Table, page_index: usize, cell_index: usize) -> UpdateCursor<'a> {
+    fn new(table: &'a mut Table, key: u32) -> UpdateCursor<'a> {
         UpdateCursor {
             table: table,
-            page_index: page_index,
-            cell_index: cell_index,
+            key: key,
         }
     }
 
-    pub fn save(&mut self, key: u32, row: &Row) -> Result<(), String> {
-        self.table
-            .pager
-            .insert_key(key, self.page_index, self.cell_index)
-            .map(|(page_index, cell_index)| {
+    pub fn save(&mut self, row: &Row) -> Result<(), String> {
+        self.table.pager.insert_key(self.key).map(
+            |CellIndex {
+                 page_index,
+                 cell_index,
+             }| {
                 let cell_pos = Page::pos_for_cell(cell_index);
                 let page = &mut self.table.pager.page_for_write(page_index);
                 Row::serialize(row, page, cell_pos + KEY_SIZE);
-            })
+            },
+        )
     }
 }

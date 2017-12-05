@@ -1,22 +1,24 @@
 pub struct CellIndex {
-    page_index: usize,
-    cell_index: usize,
+    pub page_index: usize,
+    pub cell_index: usize,
+}
+
+impl CellIndex {
+    pub fn new(page_index: usize, cell_index: usize) -> CellIndex {
+        CellIndex {
+            page_index: page_index,
+            cell_index: cell_index,
+        }
+    }
 }
 
 pub trait BTree {
-    fn search_key(&self, key: u32) -> (usize, usize);
+    fn search_key(&self, key: u32) -> CellIndex;
 
     /**
-     * this method will insert key and return the cell position for later row serialization.
-     * the returned cell position may not be the same as the input one, due to the
-     * b+tree leaf node splitting.
+     * this method will insert key and return the inserted cell index.
      **/
-    fn insert_key(
-        &mut self,
-        key: u32,
-        page_index: usize,
-        cell_index: usize,
-    ) -> Result<(usize, usize), String>;
+    fn insert_key(&mut self, key: u32) -> Result<CellIndex, String>;
 }
 
 pub enum PageType {
