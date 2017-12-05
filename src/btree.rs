@@ -42,11 +42,6 @@ pub trait BTreePage {
     fn get_num_cells(&self) -> u32;
 
     fn set_num_cells(&mut self, num_cells: u32);
-}
-
-//TODO: update num cells using `usize`
-pub trait BTreeLeafPage {
-    fn pos_for_cell(cell_index: usize) -> usize;
 
     fn set_key_for_cell(&mut self, cell_index: usize, key: u32);
 
@@ -56,6 +51,11 @@ pub trait BTreeLeafPage {
      * returns cell index
      **/
     fn find_cell_for_key(&self, key: u32) -> usize;
+}
+
+//TODO: update num cells using `usize`
+pub trait BTreeLeafPage {
+    fn pos_for_cell(cell_index: usize) -> usize;
 
     fn get_next_page(&self) -> usize;
 
@@ -65,10 +65,6 @@ pub trait BTreeLeafPage {
 }
 
 pub trait BTreeInternalPage {
-    fn set_key(&mut self, index: usize, key: u32);
-
-    fn get_key(&self, index: usize) -> u32;
-
     fn set_page_index(&mut self, index: usize, page_index: usize);
 
     fn get_page_index(&self, index: usize) -> usize;

@@ -2,6 +2,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::max;
 
 use byteorder::{BigEndian, ByteOrder};
 use btree::{BTree, BTreeInternalPage, BTreeLeafPage, BTreePage, CellIndex, PageType};
@@ -90,6 +91,12 @@ const RANGE_FOR_NEXT_PAGE: RangeFrom<usize> = RangeFrom {
 fn range_for_internal_page_key(index: usize) -> RangeFrom<usize> {
     RangeFrom {
         start: KEY_INDEX_OFFSET + INDEX_SIZE + index * INTERNAL_NODE_CELL_SIZE,
+    }
+}
+
+fn range_for_leaf_page_key(index: usize) -> RangeFrom<usize> {
+    RangeFrom {
+        start: CELL_OFFSET + index * LEAF_NODE_CELL_SIZE,
     }
 }
 
@@ -188,24 +195,21 @@ impl BTreePage for Page {
 
         BigEndian::write_u32(self.index_mut(RANGE_FOR_NUM_CELLS), num_cells)
     }
-}
-
-impl BTreeLeafPage for Page {
-    fn pos_for_cell(cell_index: usize) -> usize {
-        CELL_OFFSET + cell_index * LEAF_NODE_CELL_SIZE
-    }
 
     fn set_key_for_cell(&mut self, cell_index: usize, key: u32) {
-        let pos = Page::pos_for_cell(cell_index);
-        BigEndian::write_u32(self.index_mut(RangeFrom { start: pos }), key)
+        let range_from = match self.get_page_type() {
+            PageType::Leaf => range_for_leaf_page_key(cell_index),
+            PageType::Internal => range_for_internal_page_key(cell_index),
+        };
+        BigEndian::write_u32(self.index_mut(range_from), key)
     }
 
     fn get_key_for_cell(&self, cell_index: usize) -> u32 {
-        if cell_index >= self.get_num_cells() as usize {
-            panic!("invalid cell index!");
-        }
-        let pos = Page::pos_for_cell(cell_index);
-        BigEndian::read_u32(self.index(RangeFrom { start: pos }))
+        let range_from = match self.get_page_type() {
+            PageType::Leaf => range_for_leaf_page_key(cell_index),
+            PageType::Internal => range_for_internal_page_key(cell_index),
+        };
+        BigEndian::read_u32(self.index(range_from))
     }
 
     fn find_cell_for_key(&self, key: u32) -> usize {
@@ -231,6 +235,12 @@ impl BTreeLeafPage for Page {
         }
         return index;
     }
+}
+
+impl BTreeLeafPage for Page {
+    fn pos_for_cell(cell_index: usize) -> usize {
+        CELL_OFFSET + cell_index * LEAF_NODE_CELL_SIZE
+    }
 
     fn get_next_page(&self) -> usize {
         BigEndian::read_u32(self.index(RANGE_FOR_NEXT_PAGE)) as usize
@@ -246,14 +256,6 @@ impl BTreeLeafPage for Page {
 }
 
 impl BTreeInternalPage for Page {
-    fn set_key(&mut self, index: usize, key: u32) {
-        BigEndian::write_u32(self.index_mut(range_for_internal_page_key(index)), key)
-    }
-
-    fn get_key(&self, index: usize) -> u32 {
-        BigEndian::read_u32(self.index(range_for_internal_page_key(index)))
-    }
-
     fn set_page_index(&mut self, index: usize, page_index: usize) {
         BigEndian::write_u32(
             self.index_mut(range_for_internal_page_index(index)),
@@ -266,22 +268,7 @@ impl BTreeInternalPage for Page {
     }
 
     fn find_page_for_key(&self, key: u32) -> usize {
-        let num_cells = self.get_num_cells() as usize;
-        let mut index = 0;
-        let mut high = num_cells;
-        while index != high {
-            let mid = (index + high) / 2;
-            let curr_key = self.get_key(mid);
-            if curr_key == key {
-                index = mid;
-                break;
-            } else if curr_key > key {
-                high = mid;
-            } else {
-                index = mid + 1;
-            }
-        }
-        self.get_page_index(index)
+        self.get_page_index(self.find_cell_for_key(key))
     }
 }
 
@@ -384,9 +371,9 @@ impl Pager {
                 println!("{}- internal (size {})", padding, num_keys);
                 for index in 0..num_keys {
                     let child_page_index = page.get_page_index(index);
-                    let key = page.get_key(index);
+                    let key = page.get_key_for_cell(index);
                     self.debug_print_for_page(child_page_index, &format!("{}  ", padding));
-                    println!("{}- key {}", padding, key);
+                    println!("{}- key {}", &format!("{}  ", padding), key);
                 }
                 let child_page_index = page.get_page_index(num_keys);
                 self.debug_print_for_page(child_page_index, &format!("{}  ", padding));
@@ -402,6 +389,39 @@ impl Pager {
         }
     }
 
+    fn insert_key_into_internal(
+        &mut self,
+        page_index: usize,
+        key: u32,
+        left_page_index: usize,
+        right_page_index: usize,
+    ) {
+        let mut page = self.page_for_write(page_index);
+
+        let num_cells = page.get_num_cells() as usize;
+        let cell_index = page.find_cell_for_key(key);
+        if num_cells >= INTERNAL_NODE_MAX_CELLS {
+            //TODO: split internal node
+
+        } else if cell_index < num_cells {
+            // the right most page index should be moved first.
+            let last_page_index = page.get_page_index(num_cells);
+            page.set_page_index(num_cells + 1, last_page_index);
+
+            // and then move cells for insertion space
+            for index in (cell_index..num_cells).rev() {
+                let from = index * INTERNAL_NODE_CELL_SIZE + KEY_INDEX_OFFSET;
+                let to = from + INTERNAL_NODE_CELL_SIZE;
+                page.move_slice_internally(from, to, INTERNAL_NODE_CELL_SIZE);
+            }
+        }
+
+        page.set_num_cells((num_cells as u32) + 1);
+        page.set_key_for_cell(cell_index, key);
+        page.set_page_index(cell_index, left_page_index);
+        page.set_page_index(cell_index + 1, right_page_index);
+    }
+
     /**
      * Split a leaf page identified by given page_index.
      * If the given page is root page, then two new page will be created, and the
@@ -415,9 +435,13 @@ impl Pager {
     fn split_leaf_page(&mut self, page_index: usize) {
         let mut second_half_buf = vec![0u8; SECOND_HALF_PAGE_SIZE];
         let mut first_half_buf: Option<Vec<u8>> = None;
+        let new_key;
+        // copy bytes into vectors, which is inefficient
+        //TODO: inefficient copy of bytes
+
         {
-            let num_pages = self.num_pages;
             let mut original_page = self.page_for_write(page_index);
+            new_key = original_page.get_key_for_cell(FIRST_HALF_NUM_CELLS - 1);
             second_half_buf.clone_from_slice(original_page.index(Range {
                 start: SECOND_HALF_CELLS_OFFSET,
                 end: SECOND_HALF_CELLS_OFFSET + SECOND_HALF_PAGE_SIZE,
@@ -430,35 +454,48 @@ impl Pager {
                 }));
                 first_half_buf = Some(buf);
 
-
-                // transform original page into root (type of Internal) page
-                let key = original_page.get_key_for_cell(FIRST_HALF_NUM_CELLS - 1);
+                // reset original root page
                 original_page.set_page_type(PageType::Internal);
-                original_page.set_num_cells(1);
-                original_page.set_key(0, key);
-                original_page.set_page_index(0, num_pages);
-                original_page.set_page_index(1, num_pages + 1);
+                original_page.set_num_cells(0);
             } else {
-                // TODO: we should update/split it's parent and all ways up to root node
-                original_page.set_next_page(num_pages);
+                original_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
             }
         }
-        if let Some(buf) = first_half_buf {
-            // relocate the original page to a new page
-            // and copy first half of original page data into the new page
-            let num_pages = self.num_pages;
-            let mut relocated_page = self.page_for_write(num_pages);
-            relocated_page.wrap_slice(CELL_OFFSET, &buf);
-            relocated_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
-            relocated_page.set_next_page(num_pages + 1);
+
+        // create a new leaf page if the original page is root
+        let (parent_page_index, left_page_index) = match first_half_buf {
+            None => (
+                self.page_for_read(page_index).get_parent_page_index(),
+                page_index,
+            ),
+            Some(buf) => {
+                let left_page_index = self.num_pages;
+                let mut left_page = self.page_for_write(left_page_index);
+                left_page.wrap_slice(CELL_OFFSET, &buf);
+                left_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
+                left_page.set_next_page(left_page_index + 1);
+                left_page.set_parent_page_index(page_index);
+                (page_index, left_page_index)
+            }
+        };
+
+        // create a splitted page, and copy second half of page data into it
+        let right_page_index = self.num_pages;
+        {
+            let mut right_page = self.page_for_write(right_page_index);
+            right_page.wrap_slice(CELL_OFFSET, &second_half_buf);
+            right_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
+            right_page.set_next_page(0);
+            right_page.set_parent_page_index(parent_page_index);
         }
 
-        // copy second half of page data into new page
-        let new_page_index = self.num_pages;
-        let mut new_page = self.page_for_write(new_page_index);
-        new_page.wrap_slice(CELL_OFFSET, &second_half_buf);
-        new_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
-        new_page.set_next_page(0);
+        // update parent node
+        self.insert_key_into_internal(
+            parent_page_index,
+            new_key,
+            left_page_index,
+            right_page_index,
+        );
     }
 
     fn write_key(&mut self, key: u32, page_index: usize, cell_index: usize) {
