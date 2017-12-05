@@ -163,15 +163,10 @@ impl<'a> UpdateCursor<'a> {
     }
 
     pub fn save(&mut self, row: &Row) -> Result<(), String> {
-        self.table.pager.insert_key(self.key).map(
-            |CellIndex {
-                 page_index,
-                 cell_index,
-             }| {
-                let cell_pos = Page::pos_for_cell(cell_index);
-                let page = &mut self.table.pager.page_for_write(page_index);
-                Row::serialize(row, page, cell_pos + KEY_SIZE);
-            },
-        )
+        self.table.pager.insert_key(self.key).map(|cell_index| {
+            let cell_pos = Page::pos_for_cell(cell_index.cell_index);
+            let page = &mut self.table.pager.page_for_write(cell_index.page_index);
+            Row::serialize(row, page, cell_pos + KEY_SIZE);
+        })
     }
 }
