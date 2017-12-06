@@ -2,8 +2,8 @@ use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
 use std::cell::Ref;
 
-use pager::{Page, Pager, KEY_SIZE, ROW_SIZE};
-use btree::{BTree, BTreeLeafPage, BTreePage, CellIndex};
+use pager::Page;
+use btree::{BTree, BTreeLeafPage, BTreePage, BTreeTrait, CellIndex, KEY_SIZE, ROW_SIZE};
 
 pub struct Row {
     pub id: u32,
@@ -68,18 +68,21 @@ impl Row {
 
 
 pub struct Table {
-    pager: Pager,
+    tree: BTree,
 }
 
 impl Table {
-    pub fn new(file: &str) -> Table {
-        let pager = Pager::new(file);
-        return Table { pager: pager };
+    /**
+     * ideally there is one and only one b+tree for a table, and
+     * will be zero or more b-tree for table indices.
+     **/
+    pub fn new(tree: BTree) -> Table {
+        return Table { tree: tree };
     }
 
     pub fn close(self: &mut Table) {
-        for page_index in 0..self.pager.num_pages {
-            self.pager.flush(page_index);
+        for page_index in 0..self.tree.pager.num_pages {
+            self.tree.pager.flush(page_index);
         }
     }
 
@@ -87,29 +90,30 @@ impl Table {
         let CellIndex {
             page_index,
             cell_index,
-        } = self.pager.search_key(0);
-        SelectCursor::new(self, page_index, cell_index)
+        } = self.tree.search_key(0);
+        SelectCursor::new(&self.tree, page_index, cell_index)
     }
 
     pub fn insert_cursor(&mut self, key: u32) -> UpdateCursor {
-        UpdateCursor::new(self, key)
+        UpdateCursor::new(&mut self.tree, key)
     }
 
+    // TODO: remove this method
     pub fn debug_print(&self) {
-        self.pager.debug_print();
+        self.tree.debug_print();
     }
 }
 
 pub struct SelectCursor<'a> {
-    table: &'a Table,
+    tree: &'a BTree,
     page_index: usize,
     cell_index: usize,
 }
 
 impl<'a> SelectCursor<'a> {
-    fn new(table: &'a Table, page_index: usize, cell_index: usize) -> SelectCursor<'a> {
+    fn new(tree: &'a BTree, page_index: usize, cell_index: usize) -> SelectCursor<'a> {
         SelectCursor {
-            table: table,
+            tree: tree,
             page_index: page_index,
             cell_index: cell_index,
         }
@@ -119,13 +123,13 @@ impl<'a> SelectCursor<'a> {
      * short hand for get current page
      **/
     fn page_for_read(&self) -> Ref<Page> {
-        self.table.pager.page_for_read(self.page_index)
+        self.tree.pager.page_for_read(self.page_index)
     }
 
     pub fn end_of_table(&self) -> bool {
-        self.table.pager.num_pages == 0
+        self.tree.pager.num_pages == 0
             || (self.cell_index >= (self.page_for_read().get_num_cells() as usize)
-                && self.page_for_read().get_next_page() == 0)
+                && !self.page_for_read().has_next_page())
     }
 
     pub fn advance(&mut self) {
@@ -145,22 +149,22 @@ impl<'a> SelectCursor<'a> {
 }
 
 pub struct UpdateCursor<'a> {
-    table: &'a mut Table,
+    tree: &'a mut BTree,
     key: u32,
 }
 
 impl<'a> UpdateCursor<'a> {
-    fn new(table: &'a mut Table, key: u32) -> UpdateCursor<'a> {
+    fn new(tree: &'a mut BTree, key: u32) -> UpdateCursor<'a> {
         UpdateCursor {
-            table: table,
+            tree: tree,
             key: key,
         }
     }
 
     pub fn save(&mut self, row: &Row) -> Result<(), String> {
-        self.table.pager.insert_key(self.key).map(|cell_index| {
+        self.tree.insert_key(self.key).map(|cell_index| {
             let cell_pos = Page::pos_for_cell(cell_index.cell_index);
-            let page = &mut self.table.pager.page_for_write(cell_index.page_index);
+            let page = &mut self.tree.pager.page_for_write(cell_index.page_index);
             Row::serialize(row, page, cell_pos + KEY_SIZE);
         })
     }

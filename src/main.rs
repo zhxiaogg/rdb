@@ -10,6 +10,8 @@ mod pager;
 mod btree;
 
 use table::{Row, Table};
+use pager::Pager;
+use btree::BTree;
 
 fn main() {
     let db = if let Some(file) = env::args().nth(1) {
@@ -17,9 +19,11 @@ fn main() {
     } else {
         String::from("default.rdb")
     };
+    let pager = Pager::new(db.as_str());
+    let tree = BTree::new(pager);
 
     //TODO: print rdb info
-    let mut table = Table::new(db.as_str());
+    let mut table = Table::new(tree);
 
     let mut input_buffer = String::new();
     loop {
@@ -50,7 +54,7 @@ fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
         table.close();
         process::exit(0)
     } else if input_buffer.eq(".constants") {
-        pager::print_constants();
+        btree::print_constants();
         ExecuteResult::Ok
     } else if input_buffer.eq(".btree") {
         table.debug_print();
