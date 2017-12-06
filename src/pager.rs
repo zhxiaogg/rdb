@@ -2,7 +2,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use std::cell::{Ref, RefCell, RefMut};
-use std::cmp::max;
 
 use byteorder::{BigEndian, ByteOrder};
 use btree::{BTree, BTreeInternalPage, BTreeLeafPage, BTreePage, CellIndex, PageType};

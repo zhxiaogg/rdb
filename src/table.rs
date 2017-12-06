@@ -83,11 +83,6 @@ impl Table {
         }
     }
 
-    // TODO: how to determin whether a table is full or not?
-    pub fn is_full(self: &Table) -> bool {
-        return false;
-    }
-
     pub fn select_cursor(&self) -> SelectCursor {
         let CellIndex {
             page_index,
