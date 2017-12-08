@@ -1,6 +1,7 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
-use std::cell::Ref;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use pager::Page;
 use btree::{BTree, BTreeLeafPage, BTreePage, BTreeTrait, CellIndex, KEY_SIZE, ROW_SIZE};
@@ -119,24 +120,27 @@ impl<'a> SelectCursor<'a> {
         }
     }
 
-    /**
-     * short hand for get current page
-     **/
-    fn page_for_read(&self) -> Ref<Page> {
+    fn get_page(&self) -> Rc<RefCell<Page>> {
         self.tree.pager.page_for_read(self.page_index)
     }
 
     pub fn end_of_table(&self) -> bool {
-        self.tree.pager.num_pages == 0
-            || (self.cell_index >= (self.page_for_read().get_num_cells() as usize)
-                && !self.page_for_read().has_next_page())
+        self.tree.pager.num_pages == 0 || self.is_last_page()
+    }
+
+    fn is_last_page(&self) -> bool {
+        let rc_page = self.get_page();
+        let page = &rc_page.borrow();
+        (self.cell_index >= (page.get_num_cells() as usize) && !page.has_next_page())
     }
 
     pub fn advance(&mut self) {
-        let num_cells = self.page_for_read().get_num_cells() as usize;
+        let rc_page = self.get_page();
+        let page = &rc_page.borrow();
+        let num_cells = page.get_num_cells() as usize;
         self.cell_index += 1;
-        if self.cell_index >= num_cells && self.page_for_read().has_next_page() {
-            let next_page_index = self.page_for_read().get_next_page();
+        if self.cell_index >= num_cells && page.has_next_page() {
+            let next_page_index = page.get_next_page();
             self.page_index = next_page_index;
             self.cell_index = 0;
         }
@@ -144,7 +148,9 @@ impl<'a> SelectCursor<'a> {
 
     pub fn get(&self) -> Row {
         let cell_pos = Page::pos_for_cell(self.cell_index);
-        Row::deserialize(&self.page_for_read(), cell_pos + KEY_SIZE)
+        let rc_page = self.tree.pager.page_for_read(self.page_index);
+        let page = &rc_page.borrow();
+        Row::deserialize(page, cell_pos + KEY_SIZE)
     }
 }
 
@@ -164,7 +170,8 @@ impl<'a> UpdateCursor<'a> {
     pub fn save(&mut self, row: &Row) -> Result<(), String> {
         self.tree.insert_key(self.key).map(|cell_index| {
             let cell_pos = Page::pos_for_cell(cell_index.cell_index);
-            let page = &mut self.tree.pager.page_for_write(cell_index.page_index);
+            let rc_page = self.tree.pager.page_for_write(cell_index.page_index);
+            let page = &mut rc_page.borrow_mut();
             Row::serialize(row, page, cell_pos + KEY_SIZE);
         })
     }

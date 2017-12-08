@@ -160,7 +160,8 @@ impl BTree {
     }
 
     fn search_key_in_page(&self, key: u32, page_index: usize) -> CellIndex {
-        let page = self.pager.page_for_read(page_index);
+        let rc_page = self.pager.page_for_read(page_index);
+        let page = rc_page.borrow();
         match page.get_page_type() {
             PageType::Leaf => CellIndex::new(page_index, page.find_cell_for_key(key)),
             PageType::Internal => self.search_key_in_page(key, page.find_page_for_key(key)),
@@ -174,7 +175,8 @@ impl BTree {
         left_page_index: usize,
         right_page_index: usize,
     ) {
-        let mut page = self.pager.page_for_write(page_index);
+        let rc_page = self.pager.page_for_write(page_index);
+        let mut page = rc_page.borrow_mut();
 
         let num_cells = page.get_num_cells() as usize;
         let cell_index = page.find_cell_for_key(key);
@@ -217,7 +219,8 @@ impl BTree {
         // copy bytes into vectors, which is inefficient
         //TODO: inefficient copy of bytes
         {
-            let mut original_page = self.pager.page_for_write(page_index);
+            let rc_page = self.pager.page_for_write(page_index);
+            let mut original_page = rc_page.borrow_mut();
             new_key = original_page.get_key_for_cell(FIRST_HALF_NUM_CELLS - 1);
             second_half_buf.clone_from_slice(original_page.index(Range {
                 start: SECOND_HALF_CELLS_OFFSET,
@@ -241,13 +244,15 @@ impl BTree {
 
         // create a new leaf page if the original page is root
         let (parent_page_index, left_page_index) = match first_half_buf {
-            None => (
-                self.pager.page_for_read(page_index).get_parent_page_index(),
-                page_index,
-            ),
+            None => {
+                let rc_page = self.pager.page_for_read(page_index);
+                let page = rc_page.borrow();
+                (page.get_parent_page_index(), page_index)
+            }
             Some(buf) => {
                 let left_page_index = self.pager.num_pages;
-                let mut left_page = self.pager.page_for_write(left_page_index);
+                let rc_page = self.pager.page_for_write(left_page_index);
+                let mut left_page = rc_page.borrow_mut();
                 left_page.init_as_leaf_page(false);
                 left_page.wrap_slice(CELL_OFFSET, &buf);
                 left_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
@@ -260,7 +265,8 @@ impl BTree {
         // create a splitted page, and copy second half of page data into it
         let right_page_index = self.pager.num_pages;
         {
-            let mut right_page = self.pager.page_for_write(right_page_index);
+            let rc_page = self.pager.page_for_write(right_page_index);
+            let mut right_page = rc_page.borrow_mut();
             right_page.init_as_leaf_page(false);
             right_page.wrap_slice(CELL_OFFSET, &second_half_buf);
             right_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
@@ -278,7 +284,8 @@ impl BTree {
     }
 
     fn write_key(&mut self, key: u32, page_index: usize, cell_index: usize) {
-        let mut page = self.pager.page_for_write(page_index);
+        let rc_page = self.pager.page_for_write(page_index);
+        let mut page = rc_page.borrow_mut();
         page.set_key_for_cell(cell_index, key);
         let num_cells = page.get_num_cells();
         page.set_num_cells((num_cells + 1) as u32);
@@ -294,7 +301,8 @@ impl BTree {
     }
 
     fn debug_print_for_page(&self, page_index: usize, padding: &str) {
-        let page = self.pager.page_for_read(page_index);
+        let rc_page = self.pager.page_for_read(page_index);
+        let page = rc_page.borrow();
         match page.get_page_type() {
             PageType::Leaf => {
                 let num_cells = page.get_num_cells();
@@ -331,7 +339,8 @@ impl BTreeTrait for BTree {
     fn insert_key(&mut self, key: u32) -> Result<CellIndex, String> {
         // create page first.
         if self.pager.num_pages == 0 {
-            let mut first_page = self.pager.page_for_write(self.root_page_index);
+            let rc_page = self.pager.page_for_write(self.root_page_index);
+            let mut first_page = rc_page.borrow_mut();
             first_page.init_as_leaf_page(true);
         }
 
@@ -340,7 +349,9 @@ impl BTreeTrait for BTree {
             cell_index,
         } = self.search_key(key);
         let num_cells = {
-            self.pager.page_for_read(page_index).get_num_cells() as usize
+            let rc_page = self.pager.page_for_read(page_index);
+            let page = rc_page.borrow();
+            page.get_num_cells() as usize
         };
 
         if num_cells >= LEAF_NODE_MAX_CELLS {
@@ -348,7 +359,8 @@ impl BTreeTrait for BTree {
             self.split_leaf_page(page_index);
             return self.insert_key(key);
         } else if cell_index < num_cells {
-            let mut page = self.pager.page_for_write(page_index);
+            let rc_page = self.pager.page_for_write(page_index);
+            let mut page = rc_page.borrow_mut();
             if page.get_key_for_cell(cell_index) == key {
                 return Result::Err("Error: Duplicate key.".to_owned());
             }

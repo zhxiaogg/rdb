@@ -1,10 +1,11 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::ops::{Index, Range};
+use std::collections::HashMap;
 
 pub const PAGE_SIZE: usize = 4096;
-pub const MAX_PAGE_PER_TABLE: usize = 100;
 
 pub type Page = Vec<u8>;
 pub trait PageTrait {
@@ -47,7 +48,7 @@ impl PageTrait for Page {
 
 pub struct Pager {
     file: RefCell<File>,
-    pages: RefCell<Vec<Option<Page>>>,
+    pages: RefCell<HashMap<usize, Rc<RefCell<Page>>>>,
     pub num_pages: usize,
 }
 
@@ -64,20 +65,19 @@ impl Pager {
             panic!("Db file is not a whole number of pages. Corrupt file.");
         }
         let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
-        let pages = vec![None; MAX_PAGE_PER_TABLE];
         Pager {
             file: RefCell::new(file),
-            pages: RefCell::new(pages),
+            pages: RefCell::new(HashMap::new()),
             num_pages: num_pages,
         }
     }
 
     pub fn flush(self: &mut Pager, page_index: usize) {
         let offset = page_index * PAGE_SIZE;
-        if let Some(page) = self.pages.borrow()[page_index].as_ref() {
+        if let Some(page) = self.pages.borrow().get(&page_index) {
             let mut file = self.file.borrow_mut();
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
-            file.write_all(page.as_ref()).unwrap();
+            file.write_all(&page.borrow());
         }
     }
 
@@ -89,33 +89,32 @@ impl Pager {
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
             file.read(buf.as_mut_slice()).unwrap();
         }
-        self.pages.borrow_mut()[page_index] = Some(buf);
+        self.pages
+            .borrow_mut()
+            .insert(page_index, Rc::new(RefCell::new(buf)));
     }
 
-    pub fn page_for_read(self: &Pager, page_index: usize) -> Ref<Page> {
+    pub fn page_for_read(self: &Pager, page_index: usize) -> Rc<RefCell<Page>> {
         if page_index >= self.num_pages {
             panic!("read EOF");
-        } else if self.pages.borrow()[page_index].is_none() {
+        } else if !self.pages.borrow().contains_key(&page_index) {
             self.load(page_index);
         }
-        Ref::map(self.pages.borrow(), |pages| {
-            pages[page_index].as_ref().unwrap()
-        })
+        self.pages.borrow().get(&page_index).unwrap().clone()
     }
 
-    pub fn page_for_write(self: &mut Pager, page_index: usize) -> RefMut<Page> {
+    pub fn page_for_write(self: &mut Pager, page_index: usize) -> Rc<RefCell<Page>> {
         if page_index > self.num_pages {
             panic!("skipped write to a page");
         } else if page_index == self.num_pages {
             // need a new page
-            self.pages.borrow_mut()[page_index] = Some(Page::new_page());
+            let new_page = Rc::new(RefCell::new(Page::new_page()));
+            self.pages.borrow_mut().insert(page_index, new_page);
             self.num_pages += 1;
-        } else if self.pages.borrow()[page_index].is_none() {
+        } else if !self.pages.borrow().contains_key(&page_index) {
             // load page from file
             self.load(page_index);
         }
-        RefMut::map(self.pages.borrow_mut(), |pages| {
-            pages[page_index].as_mut().unwrap()
-        })
+        self.pages.borrow().get(&page_index).unwrap().clone()
     }
 }
