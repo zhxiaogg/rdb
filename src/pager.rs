@@ -72,6 +72,12 @@ impl Pager {
         }
     }
 
+    pub fn next_page_index(&mut self) -> usize {
+        let next = self.num_pages;
+        self.num_pages += 1;
+        next
+    }
+
     pub fn flush(self: &mut Pager, page_index: usize) {
         let offset = page_index * PAGE_SIZE;
         if let Some(page) = self.pages.borrow().get(&page_index) {
