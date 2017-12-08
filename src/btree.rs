@@ -1,4 +1,4 @@
-use pager::{Page, PageTrait, Pager, PAGE_SIZE};
+use pager::{Page, PageTrait, Pager};
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 
 use byteorder::{BigEndian, ByteOrder};
@@ -25,8 +25,6 @@ const CELL_OFFSET: usize = LEAF_NODE_HEADER_SIZE;
 pub const KEY_SIZE: usize = 4;
 const CELL_VALUE_SIZE: usize = ROW_SIZE;
 pub const LEAF_NODE_CELL_SIZE: usize = KEY_SIZE + CELL_VALUE_SIZE;
-const LEAF_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
-pub const LEAF_NODE_MAX_CELLS: usize = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
 
 // for internal page layout:
 const RIGH_PAGE_INDEX_OFFSET: usize = NUM_CELLS_OFFSET + NUM_CELLS_SIZE;
@@ -36,32 +34,45 @@ const INTERNAL_NODE_HEADER_SIZE: usize = RIGH_PAGE_INDEX_OFFSET + RIGHT_PAGE_IND
 const KEY_INDEX_OFFSET: usize = INTERNAL_NODE_HEADER_SIZE;
 const INDEX_SIZE: usize = 4;
 const INTERNAL_NODE_CELL_SIZE: usize = INDEX_SIZE + KEY_SIZE;
-const INTERNAL_NODE_SPACE_FOR_CELLS: usize = PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE;
-const INTERNAL_NODE_MAX_CELLS: usize = INTERNAL_NODE_SPACE_FOR_CELLS / INTERNAL_NODE_CELL_SIZE;
 
-// constants for leaf page split:
-const FIRST_HALF_NUM_CELLS: usize = (LEAF_NODE_MAX_CELLS + 1) / 2;
-const SECOND_HALF_NUM_CELLS: usize = LEAF_NODE_MAX_CELLS - FIRST_HALF_NUM_CELLS;
-const FIRST_HALF_PAGE_SIZE: usize = FIRST_HALF_NUM_CELLS * LEAF_NODE_CELL_SIZE;
-const SECOND_HALF_CELLS_OFFSET: usize = CELL_OFFSET + FIRST_HALF_PAGE_SIZE;
-const SECOND_HALF_PAGE_SIZE: usize = SECOND_HALF_NUM_CELLS * LEAF_NODE_CELL_SIZE;
-// const CELL_END_OFFSET: usize = CELL_OFFSET + LEAF_NODE_MAX_CELLS * LEAF_NODE_CELL_SIZE;
-
-// constants for internal page split:
-const INTERNAL_FIRST_HALF_NUM_CELLS: usize = (INTERNAL_NODE_MAX_CELLS + 1) / 2;
-const INTERNAL_SECOND_HALF_NUM_CELLS: usize =
-    INTERNAL_NODE_MAX_CELLS - INTERNAL_FIRST_HALF_NUM_CELLS;
-
-// TODO: find a better place for this method
-pub fn print_constants() {
-    println!("Constants:");
-    println!("ROW_SIZE: {}", ROW_SIZE);
-    println!("COMMON_NODE_HEADER_SIZE: {}", COMMON_NODE_HEADER_SIZE);
-    println!("LEAF_NODE_HEADER_SIZE: {}", LEAF_NODE_HEADER_SIZE);
-    println!("LEAF_NODE_CELL_SIZE: {}", LEAF_NODE_CELL_SIZE);
-    println!("LEAF_NODE_SPACE_FOR_CELLS: {}", LEAF_NODE_SPACE_FOR_CELLS);
-    println!("LEAF_NODE_MAX_CELLS: {}", LEAF_NODE_MAX_CELLS);
+pub struct BTreeConfig {
+    page_size: usize,
 }
+
+impl BTreeConfig {
+    pub fn new(page_size: usize) -> BTreeConfig {
+        BTreeConfig {
+            page_size: page_size,
+        }
+    }
+
+    pub fn print_constants(&self) {
+        println!("Constants:");
+        println!("ROW_SIZE: {}", ROW_SIZE);
+        println!("COMMON_NODE_HEADER_SIZE: {}", COMMON_NODE_HEADER_SIZE);
+        println!("LEAF_NODE_HEADER_SIZE: {}", LEAF_NODE_HEADER_SIZE);
+        println!("LEAF_NODE_CELL_SIZE: {}", LEAF_NODE_CELL_SIZE);
+        println!(
+            "LEAF_NODE_SPACE_FOR_CELLS: {}",
+            self.page_size - LEAF_NODE_HEADER_SIZE
+        );
+        println!("LEAF_NODE_MAX_CELLS: {}", self.get_max_num_cells_for_leaf());
+    }
+
+    // pub fn get_page_size(&self) -> usize{
+    //     self.page_size
+    // }
+
+    pub fn get_max_num_cells_for_leaf(&self) -> usize {
+        (self.page_size - LEAF_NODE_HEADER_SIZE) / LEAF_NODE_CELL_SIZE
+    }
+
+    pub fn get_max_num_cells_for_internal(&self) -> usize {
+        (self.page_size - INTERNAL_NODE_HEADER_SIZE) / INTERNAL_NODE_CELL_SIZE
+    }
+}
+
+
 
 pub trait BTreeTrait {
     fn search_key(&self, key: u32) -> CellIndex;
@@ -156,13 +167,17 @@ impl CellIndex {
 pub struct BTree {
     pub pager: Pager,
     root_page_index: usize,
+    pub config: BTreeConfig,
 }
 
 impl BTree {
     pub fn new(pager: Pager) -> BTree {
+        let config = BTreeConfig::new(pager.get_page_size());
+
         BTree {
             pager: pager,
             root_page_index: 0,
+            config: config,
         }
     }
 
@@ -187,7 +202,7 @@ impl BTree {
 
         let num_cells = page.get_num_cells() as usize;
         let cell_index = page.find_cell_for_key(key);
-        if num_cells >= INTERNAL_NODE_MAX_CELLS {
+        if num_cells >= self.config.get_max_num_cells_for_internal() {
             if page.is_root() {
                 self.split_root_internal_page_and_insert_key(
                     page_index,
@@ -229,6 +244,10 @@ impl BTree {
         left_page_index: usize,
         right_page_index: usize,
     ) {
+        let internal_node_max_cells = self.config.get_max_num_cells_for_internal();
+        let first_half_num_cells = (internal_node_max_cells + 1) / 2;
+        let second_half_num_cells = internal_node_max_cells - first_half_num_cells;
+
         let rc_page = self.pager.page_for_write(page_index);
         let mut page = rc_page.borrow_mut();
 
@@ -248,13 +267,13 @@ impl BTree {
         let mut inserted = false;
         let num_cells = page.get_num_cells() as usize;
         let right_most_page = page.get_page_index(num_cells);
-        new_page.set_page_index(INTERNAL_SECOND_HALF_NUM_CELLS, right_most_page);
+        new_page.set_page_index(second_half_num_cells, right_most_page);
         for cell_index in (0..num_cells).rev() {
             let cell_key = page.get_key_for_cell(cell_index);
 
-            if cell_index >= FIRST_HALF_NUM_CELLS {
+            if cell_index >= first_half_num_cells {
                 // move to new page
-                let new_cell_index = cell_index - FIRST_HALF_NUM_CELLS;
+                let new_cell_index = cell_index - first_half_num_cells;
                 if key <= cell_key && !inserted {
                     new_page.set_key_for_cell(new_cell_index, key);
                     new_page.set_page_index(new_cell_index, left_page_index);
@@ -298,6 +317,10 @@ impl BTree {
         left_page_index: usize,
         right_page_index: usize,
     ) {
+        let internal_node_max_cells = self.config.get_max_num_cells_for_internal();
+        let first_half_num_cells = (internal_node_max_cells + 1) / 2;
+        let second_half_num_cells = internal_node_max_cells - first_half_num_cells;
+
         let rc_page = self.pager.page_for_write(page_index);
         let mut page = rc_page.borrow_mut();
         let parent_page_index = page.get_parent_page_index();
@@ -314,13 +337,13 @@ impl BTree {
         let mut inserted = false;
         let num_cells = page.get_num_cells() as usize;
         let right_most_page = page.get_page_index(num_cells);
-        new_page.set_page_index(INTERNAL_SECOND_HALF_NUM_CELLS, right_most_page);
+        new_page.set_page_index(second_half_num_cells, right_most_page);
         for cell_index in (0..num_cells).rev() {
             let cell_key = page.get_key_for_cell(cell_index);
 
-            if cell_index >= FIRST_HALF_NUM_CELLS {
+            if cell_index >= first_half_num_cells {
                 // move to new page
-                let new_cell_index = cell_index - FIRST_HALF_NUM_CELLS;
+                let new_cell_index = cell_index - first_half_num_cells;
                 if key <= cell_key && !inserted {
                     new_page.set_key_for_cell(new_cell_index, key);
                     new_page.set_page_index(new_cell_index, left_page_index);
@@ -364,7 +387,14 @@ impl BTree {
      * TODO: bytes move not efficient!
      **/
     fn split_leaf_page(&mut self, page_index: usize) {
-        let mut second_half_buf = vec![0u8; SECOND_HALF_PAGE_SIZE];
+        let leaf_node_max_cells = self.config.get_max_num_cells_for_leaf();
+        let first_half_num_cells = (leaf_node_max_cells + 1) / 2;
+        let second_half_num_cells = leaf_node_max_cells - first_half_num_cells;
+        let first_half_page_size = first_half_num_cells * LEAF_NODE_CELL_SIZE;
+        let second_half_cells_offset = CELL_OFFSET + first_half_page_size;
+        let second_half_page_size = second_half_num_cells * LEAF_NODE_CELL_SIZE;
+
+        let mut second_half_buf = vec![0u8; second_half_page_size];
         let mut first_half_buf: Option<Vec<u8>> = None;
         let new_key;
         // copy bytes into vectors, which is inefficient
@@ -372,23 +402,23 @@ impl BTree {
         {
             let rc_page = self.pager.page_for_write(page_index);
             let mut original_page = rc_page.borrow_mut();
-            new_key = original_page.get_key_for_cell(FIRST_HALF_NUM_CELLS - 1);
+            new_key = original_page.get_key_for_cell(first_half_num_cells - 1);
             second_half_buf.clone_from_slice(original_page.index(Range {
-                start: SECOND_HALF_CELLS_OFFSET,
-                end: SECOND_HALF_CELLS_OFFSET + SECOND_HALF_PAGE_SIZE,
+                start: second_half_cells_offset,
+                end: second_half_cells_offset + second_half_page_size,
             }));
             if original_page.is_root() {
-                let mut buf = vec![0u8; FIRST_HALF_PAGE_SIZE];
+                let mut buf = vec![0u8; first_half_page_size];
                 buf.clone_from_slice(original_page.index(Range {
                     start: CELL_OFFSET,
-                    end: CELL_OFFSET + FIRST_HALF_PAGE_SIZE,
+                    end: CELL_OFFSET + first_half_page_size,
                 }));
                 first_half_buf = Some(buf);
 
                 // reset original root page
                 original_page.init_as_internal_page(true);
             } else {
-                original_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
+                original_page.set_num_cells(first_half_num_cells as u32);
             }
         }
 
@@ -405,7 +435,7 @@ impl BTree {
                 let mut left_page = rc_page.borrow_mut();
                 left_page.init_as_leaf_page(false);
                 left_page.wrap_slice(CELL_OFFSET, &buf);
-                left_page.set_num_cells(FIRST_HALF_NUM_CELLS as u32);
+                left_page.set_num_cells(first_half_num_cells as u32);
                 left_page.set_next_page(left_page_index + 1);
                 left_page.set_parent_page_index(page_index);
                 (page_index, left_page_index)
@@ -419,7 +449,7 @@ impl BTree {
             let mut right_page = rc_page.borrow_mut();
             right_page.init_as_leaf_page(false);
             right_page.wrap_slice(CELL_OFFSET, &second_half_buf);
-            right_page.set_num_cells(SECOND_HALF_NUM_CELLS as u32);
+            right_page.set_num_cells(second_half_num_cells as u32);
             right_page.set_next_page(0);
             right_page.set_parent_page_index(parent_page_index);
         }
@@ -504,7 +534,7 @@ impl BTreeTrait for BTree {
             page.get_num_cells() as usize
         };
 
-        if num_cells >= LEAF_NODE_MAX_CELLS {
+        if num_cells >= self.config.get_max_num_cells_for_leaf() {
             // split page
             self.split_leaf_page(page_index);
             return self.insert_key(key);
@@ -550,8 +580,9 @@ fn range_for_leaf_page_key(index: usize) -> RangeFrom<usize> {
     }
 }
 
-fn range_for_internal_page_index(index: usize) -> RangeFrom<usize> {
-    if index == INTERNAL_NODE_MAX_CELLS {
+fn range_for_internal_page_index(page_size: usize, index: usize) -> RangeFrom<usize> {
+    let max_cells = (page_size - INTERNAL_NODE_HEADER_SIZE) / INTERNAL_NODE_CELL_SIZE;
+    if index >= max_cells {
         RangeFrom {
             start: RIGH_PAGE_INDEX_OFFSET,
         }
@@ -605,14 +636,6 @@ impl BTreePage for Page {
     }
 
     fn set_num_cells(&mut self, num_cells: u32) {
-        let max_num_cells = match self.get_page_type() {
-            PageType::Leaf => LEAF_NODE_MAX_CELLS,
-            PageType::Internal => INTERNAL_NODE_MAX_CELLS,
-        };
-        if (num_cells as usize) > max_num_cells {
-            panic!("max number of cells exceeded!");
-        }
-
         BigEndian::write_u32(self.index_mut(RANGE_FOR_NUM_CELLS), num_cells)
     }
 
@@ -677,14 +700,15 @@ impl BTreeLeafPage for Page {
 
 impl BTreeInternalPage for Page {
     fn set_page_index(&mut self, index: usize, page_index: usize) {
+        let page_size = self.len();
         BigEndian::write_u32(
-            self.index_mut(range_for_internal_page_index(index)),
+            self.index_mut(range_for_internal_page_index(page_size, index)),
             page_index as u32,
         )
     }
 
     fn get_page_index(&self, index: usize) -> usize {
-        BigEndian::read_u32(self.index(range_for_internal_page_index(index))) as usize
+        BigEndian::read_u32(self.index(range_for_internal_page_index(self.len(), index))) as usize
     }
 
     fn find_page_for_key(&self, key: u32) -> usize {
