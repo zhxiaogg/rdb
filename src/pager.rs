@@ -83,10 +83,9 @@ impl Pager {
             Pager::persist_db_options(&mut file, &db_option);
         }
 
-        let num_pages = if file_size > 0 {
-            ((file_size - DB_HEADER_SIZE as u64) / (db_option.page_size as u64)) as usize
-        } else {
-            0
+        let num_pages = match file_size {
+            0 => 0,
+            _ => ((file_size - DB_HEADER_SIZE as u64) / (db_option.page_size as u64)) as usize,
         };
         Pager {
             file: RefCell::new(file),

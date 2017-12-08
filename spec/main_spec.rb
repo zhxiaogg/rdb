@@ -3,9 +3,10 @@ describe 'database' do
     `rm -rf test.rdb`
   end
 
-  def run_script(commands)
+  def run_script(commands, page_size=nil)
     raw_output = nil
-    IO.popen("RUST_BACKTRACE=1 ./target/debug/rdb test.rdb", "r+") do |pipe|
+    page_size_env = page_size ? "RDB_PAGE_SIZE=#{page_size}" : ""
+    IO.popen("RUST_BACKTRACE=1 #{page_size_env} ./target/debug/rdb test.rdb", "r+") do |pipe|
       commands.each do |command|
         pipe.puts command
       end
@@ -146,12 +147,16 @@ describe 'database' do
 
     expect(result).to eq([
       "rdb > Constants:",
+      "PAGE_SIZE: 4096",
       "ROW_SIZE: 292",
       "COMMON_NODE_HEADER_SIZE: 6",
       "LEAF_NODE_HEADER_SIZE: 14",
       "LEAF_NODE_CELL_SIZE: 296",
       "LEAF_NODE_SPACE_FOR_CELLS: 4082",
       "LEAF_NODE_MAX_CELLS: 13",
+      "INTERNAL_NODE_HEADER_SIZE: 14",
+      "INTERNAL_NODE_CELL_SIZE: 8",
+
       "rdb > ",
     ])
   end
@@ -299,5 +304,23 @@ describe 'database' do
         "    - 30",
         "rdb > ",
       ])
+    end
+
+    it 'can print a b+tree with 2 level of internal nodes' do
+      script = (1..382).map do |i|
+        "insert #{i} user#{i} person#{i}@example.com"
+      end
+      script << ".btree_internal"
+      script << ".exit"
+      result = run_script(script, 1024)
+
+      expect(result[382...(result.length)]).to eq([
+        "rdb > Tree:",
+        "- internal (size 2)",
+        "  - internal (size 63)",
+        "  - internal (size 63)",
+        "  - internal (size 62)",
+        "rdb > ",
+        ])
     end
 end

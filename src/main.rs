@@ -72,8 +72,11 @@ fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
     } else if input_buffer.eq(".constants") {
         table.tree.config.print_constants();
         ExecuteResult::Ok
+    } else if input_buffer.eq(".btree_internal") {
+        table.debug_print(true);
+        ExecuteResult::Ok
     } else if input_buffer.eq(".btree") {
-        table.debug_print();
+        table.debug_print(false);
         ExecuteResult::Ok
     } else {
         ExecuteResult::Err(format!("Unrecognized command: {}", input_buffer))
