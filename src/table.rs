@@ -69,7 +69,7 @@ impl Row {
 
 
 pub struct Table {
-    tree: BTree,
+    pub tree: BTree,
 }
 
 impl Table {

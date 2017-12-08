@@ -10,11 +10,12 @@ There is a detailed explaination about [SQLite's architecture](http://www.sqlite
   - [x] hashmap based implementation
   - [ ] use lru cache instead of hashmap
   - [ ] support mutliple tables in a single database file
+  - [ ] parameterized page size
 - b+tree (for table, in progress)
   - [x] insertion of cells
   - [x] split of leaf node
   - [x] update parent node after leaf node split
-  - [ ] split of internal node
+  - [x] split of internal node
   - [ ] removal of cells
   - [ ] support arbitrary table schema
   - [ ] page structure needs to be revised

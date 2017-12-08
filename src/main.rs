@@ -54,7 +54,7 @@ fn do_meta_command(input_buffer: &str, table: &mut Table) -> ExecuteResult {
         table.close();
         process::exit(0)
     } else if input_buffer.eq(".constants") {
-        btree::print_constants();
+        table.tree.config.print_constants();
         ExecuteResult::Ok
     } else if input_buffer.eq(".btree") {
         table.debug_print();

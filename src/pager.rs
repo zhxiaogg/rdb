@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::ops::{Index, Range};
 use std::collections::HashMap;
 
-pub const PAGE_SIZE: usize = 4096;
+pub const DEFAULT_PAGE_SIZE: usize = 4096;
 
 pub type Page = Vec<u8>;
 pub trait PageTrait {
-    fn new_page() -> Page;
+    fn new_page(page_size: usize) -> Page;
 
     fn move_slice_internally(&mut self, from: usize, to: usize, len: usize);
 
@@ -17,8 +17,8 @@ pub trait PageTrait {
 }
 
 impl PageTrait for Page {
-    fn new_page() -> Page {
-        vec![0u8; PAGE_SIZE]
+    fn new_page(page_size: usize) -> Page {
+        vec![0u8; page_size]
     }
 
     fn move_slice_internally(&mut self, from: usize, to: usize, len: usize) {
@@ -50,6 +50,7 @@ pub struct Pager {
     file: RefCell<File>,
     pages: RefCell<HashMap<usize, Rc<RefCell<Page>>>>,
     pub num_pages: usize,
+    page_size: usize,
 }
 
 impl Pager {
@@ -61,15 +62,20 @@ impl Pager {
             .open(file)
             .unwrap();
         let file_size = file.metadata().unwrap().len();
-        if file_size % (PAGE_SIZE as u64) != 0 {
+        if file_size % (DEFAULT_PAGE_SIZE as u64) != 0 {
             panic!("Db file is not a whole number of pages. Corrupt file.");
         }
-        let num_pages = (file_size / (PAGE_SIZE as u64)) as usize;
+        let num_pages = (file_size / (DEFAULT_PAGE_SIZE as u64)) as usize;
         Pager {
             file: RefCell::new(file),
             pages: RefCell::new(HashMap::new()),
             num_pages: num_pages,
+            page_size: DEFAULT_PAGE_SIZE,
         }
+    }
+
+    pub fn get_page_size(&self) -> usize {
+        self.page_size
     }
 
     pub fn next_page_index(&mut self) -> usize {
@@ -79,7 +85,7 @@ impl Pager {
     }
 
     pub fn flush(self: &mut Pager, page_index: usize) {
-        let offset = page_index * PAGE_SIZE;
+        let offset = page_index * self.page_size;
         if let Some(page) = self.pages.borrow().get(&page_index) {
             let mut file = self.file.borrow_mut();
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
@@ -88,8 +94,8 @@ impl Pager {
     }
 
     fn load(&self, page_index: usize) {
-        let offset = page_index * PAGE_SIZE;
-        let mut buf = vec![0; PAGE_SIZE];
+        let offset = page_index * self.page_size;
+        let mut buf = vec![0; self.page_size];
         {
             let mut file = self.file.borrow_mut();
             file.seek(SeekFrom::Start(offset as u64)).unwrap();
@@ -114,7 +120,7 @@ impl Pager {
             panic!("skipped write to a page");
         } else if page_index == self.num_pages {
             // need a new page
-            let new_page = Rc::new(RefCell::new(Page::new_page()));
+            let new_page = Rc::new(RefCell::new(Page::new_page(self.page_size)));
             self.pages.borrow_mut().insert(page_index, new_page);
             self.num_pages += 1;
         } else if !self.pages.borrow().contains_key(&page_index) {
