@@ -100,8 +100,8 @@ impl Table {
     }
 
     // TODO: remove this method
-    pub fn debug_print(&self) {
-        self.tree.debug_print();
+    pub fn debug_print(&self, only_internal: bool) {
+        self.tree.debug_print(only_internal);
     }
 }
 

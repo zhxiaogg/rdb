@@ -83,10 +83,9 @@ impl Pager {
             Pager::persist_db_options(&mut file, &db_option);
         }
 
-        let num_pages = if file_size > 0 {
-            ((file_size - DB_HEADER_SIZE as u64) / (db_option.page_size as u64)) as usize
-        } else {
-            0
+        let num_pages = match file_size {
+            0 => 0,
+            _ => ((file_size - DB_HEADER_SIZE as u64) / (db_option.page_size as u64)) as usize,
         };
         Pager {
             file: RefCell::new(file),
@@ -128,10 +127,8 @@ impl Pager {
         self.db_option.page_size
     }
 
-    pub fn next_page_index(&mut self) -> usize {
-        let next = self.num_pages;
-        self.num_pages += 1;
-        next
+    pub fn next_page_index(&self) -> usize {
+        self.num_pages
     }
 
     fn page_offset_in_file(&self, page_index: usize) -> u64 {
