@@ -168,7 +168,7 @@ impl CellIndex {
     }
 }
 
-struct PageSelector<'a> {
+struct SplitHelper<'a> {
     original: &'a mut Page,
     right_page: &'a mut Page,
     left_page: Option<&'a mut Page>,
@@ -179,7 +179,7 @@ struct PageSelector<'a> {
     left_page_index: usize,
 }
 
-impl<'a> PageSelector<'a> {
+impl<'a> SplitHelper<'a> {
     fn new(
         original_page: &'a mut Page,
         original_page_index: usize,
@@ -189,8 +189,8 @@ impl<'a> PageSelector<'a> {
         right_page_index: usize,
         split_position: usize,
         pager: &'a mut Pager,
-    ) -> PageSelector<'a> {
-        PageSelector {
+    ) -> SplitHelper<'a> {
+        SplitHelper {
             original: original_page,
             original_index: original_page_index,
             left_page: left_page,
@@ -242,6 +242,85 @@ impl<'a> PageSelector<'a> {
             Result::Ok(mut page) => page.set_parent_page_index(real_page_index),
             Result::Err(_) => panic!("cannot borrow page {}", page_index),
         };
+    }
+
+    fn get_internal_page_split_result(&self) -> (usize, u32, usize, usize) {
+        let (parent_page_index, left_max_key) = match self.left_page {
+            Some(ref page) => (
+                self.original_index,
+                page.get_key_for_cell(self.split_position),
+            ),
+            None => (
+                self.original.get_parent_page_index(),
+                self.original.get_key_for_cell(self.split_position),
+            ),
+        };
+
+        (
+            parent_page_index,
+            left_max_key,
+            self.left_page_index,
+            self.right_page_index,
+        )
+    }
+
+    /**
+     * original node: N = 4, M = 2: A;4|B;7|C;9|D;11|E
+     * insert (X;8;Y), N=5: A;4|B;7|X;8|Y;9|D;11|E
+     * indeces:               0|  1|  2|  3|   4|5
+     * indeces of 3, 4, 5 will be moved to right page;
+     * indeces of 0, 1, 2 will be moved to left page;
+     *
+     * returns split result (parent_page_index, new_key, left_page_index, right_page_index)
+     *
+     **/
+    fn split_internal_page(
+        &mut self,
+        key: u32,
+        left_page_index: usize,
+        right_page_index: usize,
+    ) -> (usize, u32, usize, usize) {
+        let num_cells = self.original.get_num_cells() as usize;
+        let mut inserted = false;
+        // let N = num_cells + 1;
+        // here we choose moving by deserialize & serialize
+        // however we could also choose moving bytes directly.
+        for j in (0..num_cells + 1).rev() {
+            let mut new_cell_index = match inserted {
+                true => j,
+                false => j + 1,
+            };
+            if !inserted && (j == 0 || key > self.original.get_key_for_cell(j - 1)) {
+                // found insertion position
+                if j < num_cells {
+                    let k = self.original.get_key_for_cell(j);
+                    self.set_internal_cell(new_cell_index, right_page_index, Some(k));
+                } else {
+                    self.set_internal_cell(new_cell_index, right_page_index, None);
+                }
+
+                let next_cell_index = new_cell_index - 1;
+                self.set_internal_cell(next_cell_index, left_page_index, Some(key));
+
+                inserted = true;
+            } else {
+                let original_page_index = self.original.get_page_index(j);
+                if j < num_cells {
+                    let k = self.original.get_key_for_cell(j);
+                    self.set_internal_cell(new_cell_index, original_page_index, Some(k));
+                } else {
+                    self.set_internal_cell(new_cell_index, original_page_index, None);
+                }
+            }
+        }
+
+        // set page properties accordingly
+        match self.left_page {
+            Some(_) => self.original.init_as_internal_page(true, 0),
+            None => self.original.set_num_cells(self.split_position as u32),
+        };
+
+        return self.get_internal_page_split_result();
     }
 }
 
@@ -316,56 +395,6 @@ impl BTree {
         page.set_page_index(cell_index + 1, right_page_index);
     }
 
-
-    /**
-     * original node: N = 4, M = 2: A;4|B;7|C;9|D;11|E
-     * insert (X;8;Y), N=5: A;4|B;7|X;8|Y;9|D;11|E
-     * indeces:               0|  1|  2|  3|   4|5
-     * indeces of 3, 4, 5 will be moved to right page;
-     * indeces of 0, 1, 2 will be moved to left page;
-     *
-     **/
-    fn do_internal_page_split(
-        page_selector: &mut PageSelector,
-        key: u32,
-        left_page_index: usize,
-        right_page_index: usize,
-    ) {
-        let num_cells = page_selector.original.get_num_cells() as usize;
-        let mut inserted = false;
-        let N = num_cells + 1;
-        // here we choose moving by deserialize & serialize
-        // however we could also choose moving bytes directly.
-        for j in (0..N).rev() {
-            let mut new_cell_index = match inserted {
-                true => j,
-                false => j + 1,
-            };
-            if !inserted && (j == 0 || key > page_selector.original.get_key_for_cell(j - 1)) {
-                // found insertion position
-                if j < num_cells {
-                    let k = page_selector.original.get_key_for_cell(j);
-                    page_selector.set_internal_cell(new_cell_index, right_page_index, Some(k));
-                } else {
-                    page_selector.set_internal_cell(new_cell_index, right_page_index, None);
-                }
-
-                let next_cell_index = new_cell_index - 1;
-                page_selector.set_internal_cell(next_cell_index, left_page_index, Some(key));
-
-                inserted = true;
-            } else {
-                let original_page_index = page_selector.original.get_page_index(j);
-                if j < num_cells {
-                    let k = page_selector.original.get_key_for_cell(j);
-                    page_selector.set_internal_cell(new_cell_index, original_page_index, Some(k));
-                } else {
-                    page_selector.set_internal_cell(new_cell_index, original_page_index, None);
-                }
-            }
-        }
-    }
-
     fn split_internal_page_and_insert_key(
         &mut self,
         page_index: usize,
@@ -377,85 +406,61 @@ impl BTree {
         let first_half_num_cells = (internal_node_max_cells + 1) / 2;
         let second_half_num_cells = internal_node_max_cells - first_half_num_cells;
 
-        let mut parent_page_index = page_index;
-        let mut new_left_index = page_index;
-        let max_left_key;
-        let new_page_index;
-        {
-            let rc_page = self.pager.page_for_write(page_index);
-            let page = &mut rc_page.borrow_mut();
+        let (parent_page_index, max_left_key, new_left_page_index, new_right_page_index) = {
+            let original_page_index = page_index;
+            let rc_original_page = self.pager.page_for_write(original_page_index);
+            let original_page = &mut rc_original_page.borrow_mut();
 
-            new_page_index = self.pager.num_pages;
-            let rc_new_page = self.pager.page_for_write(new_page_index);
-            let new_page = &mut rc_new_page.borrow_mut();
-            new_page.init_as_internal_page(false, second_half_num_cells as u32);
+            let new_right_page_index = self.pager.next_page_index();
+            let rc_new_right_page = self.pager.page_for_write(new_right_page_index);
+            let new_right_page = &mut rc_new_right_page.borrow_mut();
+            new_right_page.init_as_internal_page(false, second_half_num_cells as u32);
 
-            let is_root = page.is_root();
+            let is_root = original_page.is_root();
             if is_root {
-                new_left_index = self.pager.num_pages;
-                let rc_left_page = self.pager.page_for_write(new_left_index);
-                let new_left_page = &mut rc_left_page.borrow_mut();
+                let new_left_page_index = self.pager.next_page_index();
+                let rc_new_left_page = self.pager.page_for_write(new_left_page_index);
+                let new_left_page = &mut rc_new_left_page.borrow_mut();
                 new_left_page.init_as_internal_page(false, first_half_num_cells as u32);
 
-                new_left_page.set_parent_page_index(page_index);
-                new_page.set_parent_page_index(page_index);
+                new_left_page.set_parent_page_index(original_page_index);
+                new_right_page.set_parent_page_index(original_page_index);
 
-                {
-                    let mut selector = PageSelector::new(
-                        page,
-                        page_index,
-                        Some(new_left_page),
-                        new_left_index,
-                        new_page,
-                        new_page_index,
-                        first_half_num_cells,
-                        &mut self.pager,
-                    );
-
-                    BTree::do_internal_page_split(
-                        &mut selector,
-                        key,
-                        left_page_index,
-                        right_page_index,
-                    );
-                }
-
-                page.init_as_internal_page(true, 0);
-                max_left_key = new_left_page.get_key_for_cell(first_half_num_cells);
+                let mut selector = SplitHelper::new(
+                    original_page,
+                    original_page_index,
+                    Some(new_left_page),
+                    new_left_page_index,
+                    new_right_page,
+                    new_right_page_index,
+                    first_half_num_cells,
+                    &mut self.pager,
+                );
+                selector.split_internal_page(key, left_page_index, right_page_index)
             } else {
-                parent_page_index = page.get_parent_page_index();
-                new_page.set_parent_page_index(parent_page_index);
+                let parent_page_index = original_page.get_parent_page_index();
+                new_right_page.set_parent_page_index(parent_page_index);
 
-                {
-                    let mut selector = PageSelector::new(
-                        page,
-                        page_index,
-                        None,
-                        page_index,
-                        new_page,
-                        new_page_index,
-                        first_half_num_cells,
-                        &mut self.pager,
-                    );
+                let mut selector = SplitHelper::new(
+                    original_page,
+                    original_page_index,
+                    None,
+                    page_index,
+                    new_right_page,
+                    new_right_page_index,
+                    first_half_num_cells,
+                    &mut self.pager,
+                );
 
-                    BTree::do_internal_page_split(
-                        &mut selector,
-                        key,
-                        left_page_index,
-                        right_page_index,
-                    );
-                }
-
-                page.set_num_cells(first_half_num_cells as u32);
-                max_left_key = page.get_key_for_cell(first_half_num_cells);
+                selector.split_internal_page(key, left_page_index, right_page_index)
             }
-        }
+        };
         // update parent
         self.insert_key_into_internal(
             parent_page_index,
             max_left_key,
-            new_left_index,
-            new_page_index,
+            new_left_page_index,
+            new_right_page_index,
         );
     }
 
@@ -467,6 +472,7 @@ impl BTree {
      * This method returns a optinal relocated page_index (if original page is root page) and
      * the newly created page index.
      * TODO: bytes move not efficient!
+     * TODO: move to SplitHelper
      **/
     fn split_leaf_page(&mut self, page_index: usize) {
         let leaf_node_max_cells = self.config.get_max_num_cells_for_leaf();
@@ -501,7 +507,7 @@ impl BTree {
                 original_page.init_as_internal_page(true, 0);
             } else {
                 original_page.set_num_cells(first_half_num_cells as u32);
-                original_page.set_next_page(self.pager.num_pages);
+                original_page.set_next_page(self.pager.next_page_index());
             }
         }
 
@@ -517,7 +523,7 @@ impl BTree {
                 )
             }
             Some(buf) => {
-                let left_page_index = self.pager.num_pages;
+                let left_page_index = self.pager.next_page_index();
                 let rc_page = self.pager.page_for_write(left_page_index);
                 let mut left_page = rc_page.borrow_mut();
                 left_page.init_as_leaf_page(false, first_half_num_cells as u32);
@@ -529,7 +535,7 @@ impl BTree {
         };
 
         // create a splitted page, and copy second half of page data into it
-        let right_page_index = self.pager.num_pages;
+        let right_page_index = self.pager.next_page_index();
         {
             let rc_page = self.pager.page_for_write(right_page_index);
             let mut right_page = rc_page.borrow_mut();

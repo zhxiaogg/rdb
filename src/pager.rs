@@ -127,10 +127,8 @@ impl Pager {
         self.db_option.page_size
     }
 
-    pub fn next_page_index(&mut self) -> usize {
-        let next = self.num_pages;
-        self.num_pages += 1;
-        next
+    pub fn next_page_index(&self) -> usize {
+        self.num_pages
     }
 
     fn page_offset_in_file(&self, page_index: usize) -> u64 {
