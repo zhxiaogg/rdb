@@ -20,8 +20,9 @@ There is a detailed explaination about [SQLite's architecture](http://www.sqlite
   - [ ] support arbitrary table schema
   - [ ] page structure needs to be revised
 - vm
-  - parser
-  - code gen
-  - sql execution plan
+  - [ ] a simple arithmetic vm
+  - [ ] parser
+  - [ ] code gen
+  - [ ] sql execution plan
 - b-tree (for index)
 - transaction support
