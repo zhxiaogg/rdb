@@ -15,14 +15,20 @@ pub trait VM {
 }
 
 impl Statement {
+    fn new_select_statement() -> Statement {
+        Statement {
+            kind: StatementType::SELECT,
+            row_to_insert: None,
+        }
+    }
+
     pub fn prepare(input_buffer: &str) -> Result<Statement, String> {
-        if input_buffer.starts_with("select") {
-            Result::Ok(Statement {
-                kind: StatementType::SELECT,
-                row_to_insert: None,
-            })
+        if input_buffer.eq("select") {
+            Result::Ok(Statement::new_select_statement())
+        } else if input_buffer.starts_with("select") {
+            Result::Ok(Statement::new_select_statement())
         } else if input_buffer.starts_with("insert") {
-            let parts: Vec<&str> = input_buffer.trim().splitn(4, ' ').collect();
+            let parts: Vec<&str> = input_buffer.splitn(4, ' ').collect();
             if parts.len() != 4 {
                 Result::Err(input_buffer.to_owned())
             } else {
@@ -71,5 +77,17 @@ impl VM for Statement {
                 }
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statement_can_prepare_for_select_1() {
+        let prepare_result = Statement::prepare("select 1");
+        assert!(prepare_result.is_ok());
     }
 }
