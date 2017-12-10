@@ -1,5 +1,7 @@
 # rdb
 
+[![Build Status](https://travis-ci.org/zhxiaogg/rdb.svg?branch=master)](https://travis-ci.org/zhxiaogg/rdb)
+
 see [https://cstack.github.io/db_tutorial](https://cstack.github.io/db_tutorial).
 
 ## components and TODOs
