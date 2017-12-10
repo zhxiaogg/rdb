@@ -1,70 +1,35 @@
 //! This is the parser mod, implemented with nom.
-//! #parse function will be the entrance and
-//! ParsedStatement will be the final result.
+//! #parse_sql will be the entrance and
+//! ParsedSQL will be the final result.
 
-use std::str::{FromStr, from_utf8};
-use nom::{digit, IResult};
+use nom::IResult;
 
-pub enum ParsedStatement {
+pub mod operands;
+use self::operands::{parse_operand, Operand};
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ParsedSQL {
     Select { operands: Vec<Operand> },
 }
 
-/// operands are lowest elements of a statement, including:
-/// - primitive values
-/// - arithmetic expressions,
-/// - bool expressions
-/// - columns
-#[derive(Debug, PartialEq, Eq)]
-pub enum Operand {
-    /// primitive of integer type, size of 64 bits
-    Integer(i64),
-    // Add(Operand, Operand),
-
-  // Alias(Operand, String)
-}
-
-named!(_parse_i64( &[u8] ) -> i64, ws!(map_res!(map_res!(digit, from_utf8),FromStr::from_str)));
-
-named!(_parse_signed_i64( &[u8] ) -> i64,
+named!(parse_sql(&[u8]) -> ParsedSQL,
     ws!(map!(
-        pair!(alt!(tag!("+") | tag!("-") | value!(&b"+"[..])), _parse_i64),
-        |(sign, value)| match sign {
-            s if s == &b"-"[..] => -value,
-            _ => value
-        }
+        pair!(tag!("select"), parse_operand),
+        |(_, op)| ParsedSQL::Select {operands: vec![op]}
     ))
 );
 
-named!(parse_integer_operand( &[u8] ) -> Operand,
-    map!(_parse_signed_i64, |v| Operand::Integer(v)));
-
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
-    #[test]
-    fn can_parse_integer() {
-        assert_eq!(_parse_i64(b"42"), IResult::Done(&b""[..], 42));
-        assert_eq!(_parse_i64(b" 42"), IResult::Done(&b""[..], 42));
-    }
+    const EMPTY: &[u8] = &[0u8; 0];
 
     #[test]
-    fn can_parse_signed_integer() {
-        assert_eq!(_parse_signed_i64(b"+42"), IResult::Done(&b""[..], 42));
-        assert_eq!(_parse_signed_i64(b"-42"), IResult::Done(&b""[..], -42));
-        assert_eq!(_parse_signed_i64(b" - 42 "), IResult::Done(&b""[..], -42));
-    }
-
-    #[test]
-    fn parser_can_recognize_a_integer_oprand() {
-        assert_eq!(
-            parse_integer_operand(b"42"),
-            IResult::Done(&b""[..], Operand::Integer(42))
-        );
-
-        assert_eq!(
-            parse_integer_operand(b"-42"),
-            IResult::Done(&b""[..], Operand::Integer(-42))
-        );
+    fn can_recognize_simplest_select_statement() {
+        let expected = ParsedSQL::Select {
+            operands: vec![Operand::Integer(42)],
+        };
+        assert_eq!(parse_sql(b"select 42"), IResult::Done(EMPTY, expected));
     }
 }
