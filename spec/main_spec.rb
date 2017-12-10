@@ -323,4 +323,17 @@ describe 'database' do
         "rdb > ",
         ])
     end
+
+    it '[for vm] can select 40 + 2' do
+      script = []
+      script << "select 40 + 2"
+      script << ".exit"
+      result = run_script(script)
+
+      expect(result).to eq([
+        "rdb > 42",
+        "Executed.",
+        "rdb > ",
+        ])
+    end
 end
