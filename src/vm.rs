@@ -1,5 +1,4 @@
 use std::ops::{Index, IndexMut, RangeFrom};
-use std::usize;
 use std::cmp;
 use byteorder::{BigEndian, ByteOrder};
 
@@ -69,6 +68,7 @@ pub struct Statement {
     parsed: Option<ParsedSQL>,
     codes: Vec<OpCode>,
     row_to_insert: Option<Row>,
+    // TODO: stack only support i64 now.
     stack: Vec<i64>,
     pub row_buf: RowBuf,
     pc: usize,
@@ -78,11 +78,12 @@ pub struct Statement {
 pub enum ExecResult {
     PendingRow,
     Complete,
+    Error(u32),
 }
 
 pub trait VM {
-    fn execute(&mut self, table: &mut Table) -> Result<ExecResult, String>;
-    fn execute_codes(&mut self) -> Result<ExecResult, String>;
+    fn execute(&mut self, table: &mut Table) -> Result<(), String>;
+    fn execute_codes(&mut self) -> ExecResult;
 }
 
 impl Statement {
@@ -94,7 +95,7 @@ impl Statement {
             codes: Vec::new(),
             stack: Vec::new(),
             row_buf: RowBuf::new(),
-            pc: usize::MAX,
+            pc: 0,
         }
     }
 
@@ -106,7 +107,7 @@ impl Statement {
             codes: codes,
             stack: Vec::new(),
             row_buf: RowBuf::new(),
-            pc: usize::MAX,
+            pc: 0,
         }
     }
 
@@ -143,7 +144,7 @@ impl Statement {
                     codes: Vec::new(),
                     stack: Vec::new(),
                     row_buf: RowBuf::new(),
-                    pc: usize::MAX,
+                    pc: 0,
                 };
                 Result::Ok(statement)
             }
@@ -154,7 +155,7 @@ impl Statement {
 }
 
 impl VM for Statement {
-    fn execute(&mut self, table: &mut Table) -> Result<ExecResult, String> {
+    fn execute(&mut self, table: &mut Table) -> Result<(), String> {
         match self.kind {
             StatementType::SELECT if self.parsed.is_none() => {
                 let mut cursor = table.select_cursor();
@@ -163,24 +164,34 @@ impl VM for Statement {
                     println!("({}, {}, {})", row.id, &row.username, &row.email);
                     cursor.advance();
                 }
-                Result::Ok(ExecResult::Complete)
+                Result::Ok(())
             }
-            StatementType::SELECT => self.execute_codes(),
+            StatementType::SELECT => {
+                loop {
+                    match self.execute_codes() {
+                        ExecResult::Complete => break,
+                        ExecResult::PendingRow => {
+                            println!("{}", self.row_buf.read_int(0));
+                        }
+                        ExecResult::Error(error) => {
+                            return Result::Err(format!("vm execute error: {}", error));
+                        }
+                    }
+                }
+                Result::Ok(())
+            }
             StatementType::INSERT => {
                 if let Some(r) = self.row_to_insert.as_ref() {
-                    table
-                        .insert_cursor(r.id)
-                        .save(r)
-                        .map(|_| ExecResult::Complete)
+                    table.insert_cursor(r.id).save(r)
                 } else {
-                    Result::Ok(ExecResult::Complete)
+                    Result::Ok(())
                 }
             }
         }
     }
 
-    fn execute_codes(&mut self) -> Result<ExecResult, String> {
-        let mut pc = 0;
+    fn execute_codes(&mut self) -> ExecResult {
+        let mut pc = self.pc;
         let mut result = ExecResult::Complete;
         while pc < self.codes.len() {
             let code = &self.codes[pc];
@@ -191,14 +202,16 @@ impl VM for Statement {
                     if let (Some(v1), Some(v2)) = (self.stack.pop(), self.stack.pop()) {
                         self.stack.push(v1 + v2);
                     } else {
-                        return Result::Err("invalid byte codes1.".to_owned());
+                        result = ExecResult::Error(1);
+                        break;
                     }
                 }
                 &OpCode::StoreInt => {
                     if let Some(v1) = self.stack.pop() {
                         self.row_buf.write_int(v1);
                     } else {
-                        return Result::Err("store int: invalid byte codes.".to_owned());
+                        result = ExecResult::Error(1);
+                        break;
                     }
                 }
                 &OpCode::FlushRow => {
@@ -207,11 +220,14 @@ impl VM for Statement {
                     result = ExecResult::PendingRow;
                     break;
                 }
-                _ => {}
+                _ => {
+                    result = ExecResult::Error(2);
+                    break;
+                }
             }
         }
 
-        return Result::Ok(result);
+        return result;
     }
 }
 
@@ -249,11 +265,10 @@ mod tests {
     fn vm_works() {
         match Statement::prepare("select 41 + 1") {
             Result::Ok(mut statement) => match statement.execute_codes() {
-                Result::Ok(r) => {
-                    assert_eq!(r, ExecResult::PendingRow);
+                ExecResult::PendingRow => {
                     assert_eq!(statement.row_buf.read_int(0), 42);
                 }
-                Result::Err(e) => assert!(false, e),
+                _ => assert!(false, "invalid execute result!"),
             },
             _ => assert!(false, "prepare statement error"),
         }
