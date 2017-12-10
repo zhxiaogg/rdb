@@ -12,6 +12,7 @@ mod pager;
 mod btree;
 mod vm;
 mod sql;
+mod codegen;
 
 use table::Table;
 use pager::{DbOption, Pager};

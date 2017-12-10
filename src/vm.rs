@@ -1,4 +1,6 @@
 use table::{Row, Table};
+use sql;
+use sql::ParsedSQL;
 
 pub enum StatementType {
     SELECT,
@@ -7,6 +9,7 @@ pub enum StatementType {
 
 pub struct Statement {
     kind: StatementType,
+    parsed: Option<ParsedSQL>,
     row_to_insert: Option<Row>,
 }
 
@@ -15,18 +18,20 @@ pub trait VM {
 }
 
 impl Statement {
-    fn new_select_statement() -> Statement {
+    fn new_select_statement(parsed: Option<ParsedSQL>) -> Statement {
         Statement {
             kind: StatementType::SELECT,
             row_to_insert: None,
+            parsed: parsed,
         }
     }
 
     pub fn prepare(input_buffer: &str) -> Result<Statement, String> {
         if input_buffer.eq("select") {
-            Result::Ok(Statement::new_select_statement())
+            Result::Ok(Statement::new_select_statement(None))
         } else if input_buffer.starts_with("select") {
-            Result::Ok(Statement::new_select_statement())
+            sql::parse(input_buffer.as_bytes())
+                .map(|parsed_sql| Statement::new_select_statement(Some(parsed_sql)))
         } else if input_buffer.starts_with("insert") {
             let parts: Vec<&str> = input_buffer.splitn(4, ' ').collect();
             if parts.len() != 4 {
@@ -48,6 +53,7 @@ impl Statement {
                         username: username,
                         email: email,
                     }),
+                    parsed: None,
                 };
                 Result::Ok(statement)
             }
@@ -60,7 +66,7 @@ impl Statement {
 impl VM for Statement {
     fn execute(&mut self, table: &mut Table) -> Result<(), String> {
         match self.kind {
-            StatementType::SELECT => {
+            StatementType::SELECT if self.parsed.is_none() => {
                 let mut cursor = table.select_cursor();
                 while !cursor.end_of_table() {
                     let row = cursor.get();
@@ -69,6 +75,7 @@ impl VM for Statement {
                 }
                 Result::Ok(())
             }
+            StatementType::SELECT => Result::Ok(()),
             StatementType::INSERT => {
                 if let Some(r) = self.row_to_insert.as_ref() {
                     table.insert_cursor(r.id).save(r)
