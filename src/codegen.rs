@@ -12,10 +12,11 @@ pub enum OpCode {
     /// store integer value in stack to result row buffer
     StoreInt,
     Add,
+    FlushRow,
     Exit(ErrCode),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum SQLType {
     Integer,
     // Float,
@@ -24,14 +25,28 @@ pub enum SQLType {
     // DateTime
 }
 
+/// size in bytes for SQLTypes
+pub fn size_of(sql_type: SQLType) -> usize {
+    match sql_type {
+        SQLType::Integer => 8,
+    }
+}
+
 pub fn gen_code(sql: &ParsedSQL) -> Vec<OpCode> {
     let mut op_codes: Vec<OpCode> = Vec::new();
     match sql {
-        &ParsedSQL::Select { ref operands } => for op in operands {
-            translate_operand_to_code(&mut op_codes, &op);
-            let store_code = store_code_for_type(type_of(&op));
-            op_codes.push(store_code);
-        },
+        &ParsedSQL::Select { ref operands } => {
+            // code for all columns
+            for op in operands {
+                translate_operand_to_code(&mut op_codes, &op);
+
+                let store_code = store_code_for_type(type_of(&op));
+                op_codes.push(store_code);
+            }
+
+            // flush row when all operands' codes finished
+            op_codes.push(OpCode::FlushRow);
+        }
     };
 
     op_codes
@@ -44,9 +59,10 @@ fn store_code_for_type(sql_type: SQLType) -> OpCode {
     }
 }
 
+/// type inference for the operand
 fn type_of(op: &Operand) -> SQLType {
     match op {
-        &Operand::Integer(v) => SQLType::Integer,
+        &Operand::Integer(_) => SQLType::Integer,
         &Operand::Add(ref op1, ref op2) => {
             let type_op1 = type_of(op1);
             if type_op1 == type_of(op2) {
@@ -107,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn type_inference_for_constants() {
+    fn type_inference_for_constants_done_right() {
         // 3 + (4 + 5)
         let add_op = Operand::Add(Box::new(Operand::Integer(4)), Box::new(Operand::Integer(5)));
         let nested_add_op = Operand::Add(Box::new(Operand::Integer(3)), Box::new(add_op));
@@ -121,7 +137,7 @@ mod tests {
         };
         let op_codes = gen_code(&sql);
 
-        let expected = vec![OpCode::LoadInt(42), OpCode::StoreInt];
+        let expected = vec![OpCode::LoadInt(42), OpCode::StoreInt, OpCode::FlushRow];
         assert_eq!(op_codes, expected);
     }
 
