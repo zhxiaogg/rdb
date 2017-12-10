@@ -1,4 +1,6 @@
 extern crate byteorder;
+#[macro_use]
+extern crate nom;
 
 use std::io;
 use std::process;
@@ -9,6 +11,7 @@ mod table;
 mod pager;
 mod btree;
 mod vm;
+mod sql;
 
 use table::Table;
 use pager::{DbOption, Pager};
