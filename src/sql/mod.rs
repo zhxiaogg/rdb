@@ -23,17 +23,36 @@ pub enum Operand {
   // Alias(Operand, String)
 }
 
-named!(_parse_i64( &[u8] ) -> i64, map_res!(map_res!(digit, from_utf8),FromStr::from_str));
+named!(_parse_i64( &[u8] ) -> i64, ws!(map_res!(map_res!(digit, from_utf8),FromStr::from_str)));
+
+named!(_parse_signed_i64( &[u8] ) -> i64,
+    ws!(map!(
+        pair!(alt!(tag!("+") | tag!("-") | value!(&b"+"[..])), _parse_i64),
+        |(sign, value)| match sign {
+            s if s == &b"-"[..] => -value,
+            _ => value
+        }
+    ))
+);
+
 named!(parse_integer_operand( &[u8] ) -> Operand,
-    map_res!(_parse_i64, |v| {Result::Ok::<Operand,String>(Operand::Integer(v))}));
+    map!(_parse_signed_i64, |v| Operand::Integer(v)));
 
 #[cfg(test)]
 mod test {
     use super::*;
-    
+
     #[test]
     fn can_parse_integer() {
         assert_eq!(_parse_i64(b"42"), IResult::Done(&b""[..], 42));
+        assert_eq!(_parse_i64(b" 42"), IResult::Done(&b""[..], 42));
+    }
+
+    #[test]
+    fn can_parse_signed_integer() {
+        assert_eq!(_parse_signed_i64(b"+42"), IResult::Done(&b""[..], 42));
+        assert_eq!(_parse_signed_i64(b"-42"), IResult::Done(&b""[..], -42));
+        assert_eq!(_parse_signed_i64(b" - 42 "), IResult::Done(&b""[..], -42));
     }
 
     #[test]
@@ -41,6 +60,11 @@ mod test {
         assert_eq!(
             parse_integer_operand(b"42"),
             IResult::Done(&b""[..], Operand::Integer(42))
+        );
+
+        assert_eq!(
+            parse_integer_operand(b"-42"),
+            IResult::Done(&b""[..], Operand::Integer(-42))
         );
     }
 }
