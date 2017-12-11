@@ -14,7 +14,6 @@ mod pager;
 mod btree;
 mod vm;
 mod sql;
-mod codegen;
 
 use table::Table;
 use pager::{DbOption, Pager};
@@ -46,7 +45,7 @@ fn main() {
             continue;
         }
 
-        match Statement::prepare(&input_buffer.trim()) {
+        match Statement::prepare(&input_buffer.trim(), &table.schema) {
             Result::Ok(mut statement) => match statement.execute(&mut table) {
                 Result::Ok(_) => println!("Executed."),
                 Result::Err(msg) => println!("{}", &msg),
