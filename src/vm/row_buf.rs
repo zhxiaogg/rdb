@@ -3,7 +3,6 @@ use byteorder::{BigEndian, ByteOrder};
 use sql::SQLType;
 use std::cmp;
 use std::fmt;
-use super::codegen::OpCode;
 use super::codegen;
 
 pub struct RowBuf {
