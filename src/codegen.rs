@@ -39,7 +39,10 @@ pub fn size_of(sql_type: SQLType) -> usize {
 pub fn gen_code(sql: &ParsedSQL) -> Vec<OpCode> {
     let mut op_codes: Vec<OpCode> = Vec::new();
     match sql {
-        &ParsedSQL::Select { ref operands } => {
+        &ParsedSQL::Select {
+            ref table,
+            ref operands,
+        } => {
             // code for all columns
             for op in operands {
                 translate_operand_to_code(&mut op_codes, &op);
@@ -140,6 +143,7 @@ mod tests {
     #[test]
     fn gen_codes_for_the_simplest_select_statement() {
         let sql = ParsedSQL::Select {
+            table: None,
             operands: vec![Operand::Integer(42)],
         };
         let op_codes = gen_code(&sql);
@@ -151,6 +155,7 @@ mod tests {
     #[test]
     fn gen_codes_for_select_string_literal() {
         let sql = ParsedSQL::Select {
+            table: None,
             operands: vec![Operand::String("foo, bar".to_owned())],
         };
         let op_codes = gen_code(&sql);

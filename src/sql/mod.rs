@@ -2,25 +2,40 @@
 //! #parse will be the entrance and
 //! ParsedSQL will be the final result.
 
-use nom::IResult;
-
+use nom::{alphanumeric, IResult};
+use std::str;
 pub mod operands;
 use self::operands::{parse_operand, Operand};
 
+pub type TableName = String;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ParsedSQL {
-    Select { operands: Vec<Operand> },
+    Select {
+        table: Option<TableName>,
+        operands: Vec<Operand>,
+    },
 }
 
 named!(parse_multiple_operands(&[u8]) -> Vec<Operand>,
-    separated_list_complete!(tag!(","), parse_operand)
+    alt!(
+        map!(ws!(tag!("*")), |_| Vec::new()) |
+        separated_list_complete!(tag!(","), parse_operand)
+    )
+);
+
+named!(parse_table_name(&[u8]) -> TableName,
+    ws!(map_res!(alphanumeric, |bytes| str::from_utf8(bytes).map(|str| str.to_owned())))
 );
 
 named!(parse_sql(&[u8]) -> ParsedSQL,
     ws!(map!(
-        pair!(tag!("select"), parse_multiple_operands),
-        |(_, op)| ParsedSQL::Select {operands: op}
+        tuple!(
+            tag!("select"),
+            parse_multiple_operands,
+            opt!(complete!(preceded!(tag!("from"), parse_table_name)))
+        ),
+        |(_, op, table)| ParsedSQL::Select {operands: op, table: table}
     ))
 );
 
@@ -39,6 +54,7 @@ mod tests {
     #[test]
     fn can_recognize_simplest_select_statement() {
         let expected = ParsedSQL::Select {
+            table: None,
             operands: vec![Operand::Integer(42)],
         };
         assert_eq!(parse_sql(b"select 42"), IResult::Done(EMPTY, expected));
@@ -47,6 +63,7 @@ mod tests {
     #[test]
     fn can_recognize_a_select_text_statement() {
         let expected = ParsedSQL::Select {
+            table: None,
             operands: vec![Operand::String("nihao, rdb.".to_owned())],
         };
         assert_eq!(
@@ -58,6 +75,7 @@ mod tests {
     #[test]
     fn can_recognize_a_select_statement_for_multiple_columns() {
         let expected = ParsedSQL::Select {
+            table: None,
             operands: vec![
                 Operand::String("nihao, rdb.".to_owned()),
                 Operand::Integer(42),
@@ -66,6 +84,19 @@ mod tests {
         };
         assert_eq!(
             parse_sql(b"select 'nihao, rdb.', 42, 'e'"),
+            IResult::Done(EMPTY, expected)
+        );
+    }
+
+    #[test]
+    fn can_recognize_the_select_from_table_statement() {
+        let expected = ParsedSQL::Select {
+            table: Some("users".to_owned()),
+            operands: Vec::new(),
+        };
+
+        assert_eq!(
+            parse_sql(b"select * from users"),
             IResult::Done(EMPTY, expected)
         );
     }
