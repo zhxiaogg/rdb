@@ -44,11 +44,15 @@ pub fn gen_code(sql: &ParsedSQL, schema: &Schema) -> Vec<OpCode> {
             if let &Some(ref name) = table {
                 op_codes.push(OpCode::TableRead(name.to_owned()));
                 op_codes.push(OpCode::Loop);
+
+                let mut loop_body = Vec::new();
+                loop_body.push(OpCode::CursorRead);
+                gen_code_for_column_reads(&mut loop_body, operands, schema);
+                loop_body.push(OpCode::Rewind);
+
                 op_codes.push(OpCode::CursorHasNext);
-                op_codes.push(OpCode::CompareAndJump(0, 9));
-                op_codes.push(OpCode::CursorRead);
-                gen_code_for_column_reads(&mut op_codes, operands, schema);
-                op_codes.push(OpCode::Rewind);
+                op_codes.push(OpCode::CompareAndJump(0, loop_body.len() as i32 + 1));
+                op_codes.append(&mut loop_body);
             } else {
                 gen_code_for_column_reads(&mut op_codes, operands, schema);
             }
@@ -227,7 +231,7 @@ mod tests {
             OpCode::TableRead("users".to_owned()), // open table and create a select cursor
             OpCode::Loop,
             OpCode::CursorHasNext,
-            OpCode::CompareAndJump(0, 9),
+            OpCode::CompareAndJump(0, 8),
             OpCode::CursorRead,
             OpCode::ColumnRead(0),
             OpCode::StoreInt,
