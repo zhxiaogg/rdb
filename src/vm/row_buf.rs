@@ -1,10 +1,10 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
-use codegen::OpCode;
-use codegen;
 use sql::SQLType;
 use std::cmp;
 use std::fmt;
+use super::codegen::OpCode;
+use super::codegen;
 
 pub struct RowBuf {
     buf: Vec<u8>,

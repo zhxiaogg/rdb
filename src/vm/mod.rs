@@ -2,12 +2,12 @@ use table::{Row, Table};
 use table::schema::Schema;
 use sql;
 use sql::ParsedSQL;
-use codegen;
-use codegen::OpCode;
 use sql::SQLType;
 
 mod row_buf;
 use self::row_buf::RowBuf;
+mod codegen;
+use self::codegen::OpCode;
 
 pub enum StatementType {
     SELECT,
