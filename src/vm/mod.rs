@@ -227,37 +227,6 @@ mod tests {
         assert!(prepare_result.is_ok());
     }
 
-    #[test]
-    fn can_read_integer_from_row_buf() {
-        let mut row_buf = RowBuf::new();
-        row_buf.write_int(42);
-        assert_eq!(row_buf.read_int(0), Result::Ok(42));
-    }
-
-    #[test]
-    fn can_read_all_column_values_from_row_buf() {
-        let mut row_buf = RowBuf::new();
-
-        row_buf.write_str("foo");
-        for i in 0..100 {
-            row_buf.write_int(i * 10);
-        }
-        row_buf.write_str("bar");
-
-        assert_eq!(row_buf.read_str(0), Result::Ok("foo".to_owned()));
-        for i in 0..100 {
-            assert_eq!(row_buf.read_int(i + 1), Result::Ok((i * 10) as i64));
-        }
-        assert_eq!(row_buf.read_str(101), Result::Ok("bar".to_owned()));
-    }
-
-    #[test]
-    fn can_read_string_from_row_buf() {
-        let mut row_buf = RowBuf::new();
-        row_buf.write_str("rdb");
-        assert_eq!(row_buf.read_str(0), Result::Ok("rdb".to_owned()));
-    }
-
     fn verify_vm_execution(sql: &str, expected: &str) {
         let schema = get_schema();
         match Statement::prepare(sql, &schema) {
