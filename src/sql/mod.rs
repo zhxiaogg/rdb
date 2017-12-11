@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn can_recognize_the_select_from_table_statement() {
+    fn can_recognize_the_select_all_from_table_statement() {
         let expected = ParsedSQL::Select {
             table: Some("users".to_owned()),
             operands: Vec::new(),
@@ -97,6 +97,19 @@ mod tests {
 
         assert_eq!(
             parse_sql(b"select * from users"),
+            IResult::Done(EMPTY, expected)
+        );
+    }
+
+    #[test]
+    fn can_recognize_the_select_columns_from_table_statement() {
+        let expected = ParsedSQL::Select {
+            table: Some("users".to_owned()),
+            operands: vec![Operand::Column("id".to_owned()), Operand::Integer(42)],
+        };
+
+        assert_eq!(
+            parse_sql(b"select id, 42 from users"),
             IResult::Done(EMPTY, expected)
         );
     }

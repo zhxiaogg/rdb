@@ -6,7 +6,7 @@
 //! - columns (basic operand)
 
 use std::str::{FromStr, from_utf8};
-use nom::{digit, IResult};
+use nom::{alphanumeric, digit, IResult};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -18,6 +18,8 @@ pub enum Operand {
     Add(Box<Operand>, Box<Operand>),
 
     String(String),
+
+    Column(String),
     // Alias(Operand, String)
 }
 
@@ -43,8 +45,15 @@ named!(parse_parens_operand(&[u8]) -> Operand,
     ))
 );
 
+named!(parse_column_operand(&[u8]) -> Operand,
+    ws!(map_res!(
+        alphanumeric,
+        |bytes| from_utf8(bytes).map(|str| Operand::Column(str.to_owned()))
+    ))
+);
+
 named!(parse_basic_operand(&[u8]) -> Operand,
-    alt!(parse_integer_operand | parse_parens_operand)
+    alt!(parse_integer_operand | parse_parens_operand|parse_column_operand)
 );
 
 named!(parse_str_operand(&[u8]) -> Operand,
@@ -112,6 +121,15 @@ mod test {
     }
 
     #[test]
+    fn can_recognize_a_column_operand() {
+        let expected = Operand::Column("name".to_owned());
+        assert_eq!(
+            parse_column_operand(b"name"),
+            IResult::Done(EMPTY, expected)
+        );
+    }
+
+    #[test]
     fn can_parse_basic_operands() {
         assert_eq!(
             parse_basic_operand(b" -42 "),
@@ -123,6 +141,9 @@ mod test {
             parse_basic_operand(b" (-42 ) "),
             IResult::Done(EMPTY, expected)
         );
+
+        let expected = Operand::Column("id".to_owned());
+        assert_eq!(parse_basic_operand(b"id"), IResult::Done(EMPTY, expected));
     }
 
     #[test]
@@ -136,22 +157,12 @@ mod test {
 
     #[test]
     fn can_parse_any_operands_in_this_universe() {
-        assert_eq!(
-            parse_operand(b" -42 "),
-            IResult::Done(EMPTY, Operand::Integer(-42))
-        );
-
-        let mut expected = Operand::Add(
-            Box::new(Operand::Integer(-42)),
-            Box::new(Operand::Integer(5)),
-        );
-        assert_eq!(parse_operand(b"-42 + 5"), IResult::Done(EMPTY, expected));
-
-        let add_ops = Operand::Add(Box::new(Operand::Integer(5)), Box::new(Operand::Integer(3)));
+        let id_op = Operand::Column("id".to_owned());
+        let add_ops = Operand::Add(Box::new(Operand::Integer(5)), Box::new(id_op));
         let parens_ops = Operand::Parentheses(Box::new(add_ops));
-        expected = Operand::Add(Box::new(Operand::Integer(-42)), Box::new(parens_ops));
+        let mut expected = Operand::Add(Box::new(Operand::Integer(-42)), Box::new(parens_ops));
         assert_eq!(
-            parse_operand(b"-42 + (5 + 3)"),
+            parse_operand(b"-42 + (5 + id)"),
             IResult::Done(EMPTY, expected)
         );
 

@@ -82,6 +82,7 @@ fn type_of(op: &Operand) -> SQLType {
         }
         &Operand::Parentheses(ref op) => type_of(op),
         &Operand::String(ref str) => SQLType::String,
+        &Operand::Column(ref column) => panic!("not implemented"),
     }
 }
 
@@ -97,6 +98,7 @@ fn translate_operand_to_code(op_codes: &mut Vec<OpCode>, op: &Operand) {
             translate_operand_to_code(op_codes, op);
         }
         &Operand::String(ref str) => op_codes.push(OpCode::LoadStr(str.to_owned())),
+        &Operand::Column(ref column) => panic!("not implemented"),
     }
 }
 
