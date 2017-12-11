@@ -1,5 +1,6 @@
 use std::ops::{Index, IndexMut, Range, RangeFrom};
 use std::cmp;
+use std::fmt;
 use byteorder::{BigEndian, ByteOrder};
 
 use table::{Row, Table};
@@ -106,6 +107,41 @@ impl RowBuf {
             });
             String::from_utf8(bytes.to_vec()).map_err(|_| "invalid utf8 bytes.".to_owned())
         })
+    }
+}
+
+impl fmt::Display for RowBuf {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let num_columns = self.column_types.len();
+
+        let mut line = format!("(");
+        for column_index in 0..num_columns {
+            if column_index > 0 {
+                line = format!("{}, ", line);
+            }
+            match self.column_types[column_index] {
+                SQLType::Integer => match self.read_int(column_index) {
+                    Result::Ok(v) => {
+                        line = format!("{}{}", line, v);
+                    }
+                    Result::Err(str) => {
+                        line = format!("{}{}", line, &str);
+                        break;
+                    }
+                },
+                SQLType::String => match self.read_str(column_index) {
+                    Result::Ok(str) => {
+                        line = format!("{}'{}'", line, &str);
+                    }
+                    Result::Err(str) => {
+                        line = format!("{}{}", line, &str);
+                        break;
+                    }
+                },
+            }
+        }
+        line = format!("{})", line);
+        write!(f, "{}", line)
     }
 }
 
@@ -222,7 +258,7 @@ impl VM for Statement {
                     match self.execute_codes() {
                         ExecResult::Complete => break,
                         ExecResult::PendingRow => {
-                            println!("{}", self.row_buf.read_int(0).unwrap());
+                            println!("{}", self.row_buf);
                         }
                         ExecResult::Error(error) => {
                             return Result::Err(format!("vm execute error: {}", error));
