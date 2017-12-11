@@ -13,10 +13,14 @@ pub enum ParsedSQL {
     Select { operands: Vec<Operand> },
 }
 
+named!(parse_multiple_operands(&[u8]) -> Vec<Operand>,
+    separated_list_complete!(tag!(","), parse_operand)
+);
+
 named!(parse_sql(&[u8]) -> ParsedSQL,
     ws!(map!(
-        pair!(tag!("select"), parse_operand),
-        |(_, op)| ParsedSQL::Select {operands: vec![op]}
+        pair!(tag!("select"), parse_multiple_operands),
+        |(_, op)| ParsedSQL::Select {operands: op}
     ))
 );
 
@@ -47,6 +51,21 @@ mod tests {
         };
         assert_eq!(
             parse_sql(b"select 'nihao, rdb.'"),
+            IResult::Done(EMPTY, expected)
+        );
+    }
+
+    #[test]
+    fn can_recognize_a_select_statement_for_multiple_columns() {
+        let expected = ParsedSQL::Select {
+            operands: vec![
+                Operand::String("nihao, rdb.".to_owned()),
+                Operand::Integer(42),
+                Operand::String("e".to_owned()),
+            ],
+        };
+        assert_eq!(
+            parse_sql(b"select 'nihao, rdb.', 42, 'e'"),
             IResult::Done(EMPTY, expected)
         );
     }

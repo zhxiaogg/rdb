@@ -339,12 +339,12 @@ describe 'database' do
 
     it '[vm] can select string' do
       script = []
-      script << "select 'nihao, rdb!'"
+      script << "select 42, 'nihao, rdb!'"
       script << ".exit"
       result = run_script(script)
 
       expect(result).to eq([
-        "rdb > ('nihao, rdb!')",
+        "rdb > (42, 'nihao, rdb!')",
         "Executed.",
         "rdb > ",
         ])

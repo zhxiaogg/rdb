@@ -384,12 +384,11 @@ mod tests {
         assert_eq!(row_buf.read_str(0), Result::Ok("rdb".to_owned()));
     }
 
-    #[test]
-    fn vm_works() {
-        match Statement::prepare("select 41 + 1") {
+    fn verify_vm_execution(sql: &str, expected: &str) {
+        match Statement::prepare(sql) {
             Result::Ok(mut statement) => match statement.execute_codes() {
                 ExecResult::PendingRow => {
-                    assert_eq!(statement.row_buf.read_int(0), Result::Ok(42));
+                    assert_eq!(format!("{}", statement.row_buf), expected);
                 }
                 _ => assert!(false, "invalid execute result!"),
             },
@@ -398,18 +397,17 @@ mod tests {
     }
 
     #[test]
+    fn vm_works() {
+        verify_vm_execution("select 41 + 1", "(42)");
+    }
+
+    #[test]
     fn vm_can_select_text() {
-        match Statement::prepare("select 'hello, rdb!'") {
-            Result::Ok(mut statement) => match statement.execute_codes() {
-                ExecResult::PendingRow => {
-                    assert_eq!(
-                        statement.row_buf.read_str(0),
-                        Result::Ok("hello, rdb!".to_owned())
-                    );
-                }
-                _ => assert!(false, "invalid execute result!"),
-            },
-            _ => assert!(false, "prepare statement error"),
-        }
+        verify_vm_execution("select 'hello, rdb!'", "('hello, rdb!')");
+    }
+
+    #[test]
+    fn vm_can_select_multiple_columns() {
+        verify_vm_execution("select 42, 'hello, rdb!'", "(42, 'hello, rdb!')");
     }
 }
