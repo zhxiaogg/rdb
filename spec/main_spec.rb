@@ -324,14 +324,27 @@ describe 'database' do
         ])
     end
 
-    it '[for vm] can select 40 + 2' do
+    it '[vm] can select 40 + 2' do
       script = []
       script << "select 40 + 2"
       script << ".exit"
       result = run_script(script)
 
       expect(result).to eq([
-        "rdb > 42",
+        "rdb > (42)",
+        "Executed.",
+        "rdb > ",
+        ])
+    end
+
+    it '[vm] can select string' do
+      script = []
+      script << "select 'nihao, rdb!'"
+      script << ".exit"
+      result = run_script(script)
+
+      expect(result).to eq([
+        "rdb > ('nihao, rdb!')",
         "Executed.",
         "rdb > ",
         ])

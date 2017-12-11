@@ -9,8 +9,10 @@ pub type ErrCode = u32;
 pub enum OpCode {
     /// load a constant integer value into stack
     LoadInt(i64),
+    LoadStr(String),
     /// store integer value in stack to result row buffer
     StoreInt,
+    StoreStr,
     Add,
     FlushRow,
     Exit(ErrCode),
@@ -21,6 +23,7 @@ pub enum SQLType {
     Integer,
     // Float,
     // Boolean,
+    String,
     // Text,
     // DateTime
 }
@@ -29,6 +32,7 @@ pub enum SQLType {
 pub fn size_of(sql_type: SQLType) -> usize {
     match sql_type {
         SQLType::Integer => 8,
+        SQLType::String => 0,
     }
 }
 
@@ -55,6 +59,7 @@ pub fn gen_code(sql: &ParsedSQL) -> Vec<OpCode> {
 fn store_code_for_type(sql_type: SQLType) -> OpCode {
     match sql_type {
         SQLType::Integer => OpCode::StoreInt,
+        SQLType::String => OpCode::StoreStr,
         // _ => OpCode::Exit(1),
     }
 }
@@ -73,6 +78,7 @@ fn type_of(op: &Operand) -> SQLType {
             }
         }
         &Operand::Parentheses(ref op) => type_of(op),
+        &Operand::String(ref str) => SQLType::String,
     }
 }
 
@@ -87,6 +93,7 @@ fn translate_operand_to_code(op_codes: &mut Vec<OpCode>, op: &Operand) {
         &Operand::Parentheses(ref op) => {
             translate_operand_to_code(op_codes, op);
         }
+        &Operand::String(ref str) => op_codes.push(OpCode::LoadStr(str.to_owned())),
     }
 }
 
@@ -141,4 +148,18 @@ mod tests {
         assert_eq!(op_codes, expected);
     }
 
+    #[test]
+    fn gen_codes_for_select_string_literal() {
+        let sql = ParsedSQL::Select {
+            operands: vec![Operand::String("foo, bar".to_owned())],
+        };
+        let op_codes = gen_code(&sql);
+
+        let expected = vec![
+            OpCode::LoadStr("foo, bar".to_owned()),
+            OpCode::StoreStr,
+            OpCode::FlushRow,
+        ];
+        assert_eq!(op_codes, expected);
+    }
 }

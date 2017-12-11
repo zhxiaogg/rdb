@@ -39,4 +39,15 @@ mod tests {
         };
         assert_eq!(parse_sql(b"select 42"), IResult::Done(EMPTY, expected));
     }
+
+    #[test]
+    fn can_recognize_a_select_text_statement() {
+        let expected = ParsedSQL::Select {
+            operands: vec![Operand::String("nihao, rdb.".to_owned())],
+        };
+        assert_eq!(
+            parse_sql(b"select 'nihao, rdb.'"),
+            IResult::Done(EMPTY, expected)
+        );
+    }
 }

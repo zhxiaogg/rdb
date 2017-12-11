@@ -16,6 +16,8 @@ pub enum Operand {
     Parentheses(Box<Operand>),
 
     Add(Box<Operand>, Box<Operand>),
+
+    String(String),
     // Alias(Operand, String)
 }
 
@@ -45,6 +47,13 @@ named!(parse_basic_operand(&[u8]) -> Operand,
     alt!(parse_integer_operand | parse_parens_operand)
 );
 
+named!(parse_str_operand(&[u8]) -> Operand,
+    ws!(map_res!(
+        delimited!(tag!("'"), is_not!("'"), tag!("'")),
+        |bytes| from_utf8(bytes).map(|str| Operand::String(str.to_owned()))
+    ))
+);
+
 named!(parse_add_operand(&[u8]) -> Operand,
     map!(tuple!(parse_basic_operand, ws!(tag!("+")), parse_basic_operand),
         |(v1, _, v2)| Operand::Add(Box::new(v1), Box::new(v2))
@@ -52,7 +61,7 @@ named!(parse_add_operand(&[u8]) -> Operand,
 );
 
 named!(pub parse_operand(&[u8]) -> Operand,
-    alt_complete!(parse_add_operand | parse_basic_operand)
+    alt_complete!(parse_add_operand | parse_basic_operand | parse_str_operand)
 );
 
 #[cfg(test)]
@@ -117,6 +126,15 @@ mod test {
     }
 
     #[test]
+    fn can_recognize_a_string_literal() {
+        let expected = Operand::String(" as df ".to_owned());
+        assert_eq!(
+            parse_str_operand(b" ' as df ' "),
+            IResult::Done(EMPTY, expected)
+        );
+    }
+
+    #[test]
     fn can_parse_any_operands_in_this_universe() {
         assert_eq!(
             parse_operand(b" -42 "),
@@ -136,5 +154,8 @@ mod test {
             parse_operand(b"-42 + (5 + 3)"),
             IResult::Done(EMPTY, expected)
         );
+
+        expected = Operand::String("nihao.".to_owned());
+        assert_eq!(parse_operand(b"'nihao.'"), IResult::Done(EMPTY, expected))
     }
 }
