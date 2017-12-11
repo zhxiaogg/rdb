@@ -199,6 +199,21 @@ mod tests {
     }
 
     #[test]
+    fn gen_code_for_column_operands() {
+        // select id + 42 from users
+        let schema = get_schema();
+        let operand = Operand::Add(
+            Box::new(Operand::Column("id".to_owned())),
+            Box::new(Operand::Integer(42)),
+        );
+        let mut op_codes = Vec::new();
+        translate_operand_to_code(&mut op_codes, &operand, &schema);
+
+        let expected = vec![OpCode::ColumnRead(0), OpCode::LoadInt(42), OpCode::Add];
+        assert_eq!(op_codes, expected);
+    }
+
+    #[test]
     fn gen_codes_for_select_table() {
         let schema = get_schema();
         // select id, 42 from users
