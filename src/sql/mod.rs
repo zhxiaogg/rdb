@@ -9,6 +9,16 @@ use self::operands::{parse_operand, Operand};
 
 pub type TableName = String;
 
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum SQLType {
+    Integer,
+    // Float,
+    // Boolean,
+    String,
+    // Text,
+    // DateTime
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum ParsedSQL {
     Select {

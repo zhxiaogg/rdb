@@ -2,9 +2,11 @@ use std::ops::{Index, IndexMut, Range, RangeFrom};
 use byteorder::{BigEndian, ByteOrder};
 use std::cell::RefCell;
 use std::rc::Rc;
-
 use pager::Page;
 use btree::{BTree, BTreeLeafPage, BTreePage, BTreeTrait, CellIndex, KEY_SIZE, ROW_SIZE};
+
+pub mod schema;
+use self::schema::Schema;
 
 pub struct Row {
     pub id: u32,
@@ -70,6 +72,7 @@ impl Row {
 
 pub struct Table {
     pub tree: BTree,
+    pub schema: Schema,
 }
 
 impl Table {
@@ -78,7 +81,10 @@ impl Table {
      * will be zero or more b-tree for table indices.
      **/
     pub fn new(tree: BTree) -> Table {
-        return Table { tree: tree };
+        return Table {
+            tree: tree,
+            schema: Schema::new(),
+        };
     }
 
     pub fn close(self: &mut Table) {

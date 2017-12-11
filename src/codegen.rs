@@ -1,7 +1,8 @@
 use std::vec::Vec;
 
-use sql::ParsedSQL;
+use sql::{ParsedSQL, SQLType};
 use sql::operands::Operand;
+use table::schema::Schema;
 
 pub type ErrCode = u32;
 
@@ -18,16 +19,6 @@ pub enum OpCode {
     Exit(ErrCode),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum SQLType {
-    Integer,
-    // Float,
-    // Boolean,
-    String,
-    // Text,
-    // DateTime
-}
-
 /// size in bytes for SQLTypes
 pub fn size_of(sql_type: SQLType) -> usize {
     match sql_type {
@@ -36,7 +27,7 @@ pub fn size_of(sql_type: SQLType) -> usize {
     }
 }
 
-pub fn gen_code(sql: &ParsedSQL) -> Vec<OpCode> {
+pub fn gen_code(sql: &ParsedSQL, schema: &Schema) -> Vec<OpCode> {
     let mut op_codes: Vec<OpCode> = Vec::new();
     match sql {
         &ParsedSQL::Select {
@@ -47,7 +38,7 @@ pub fn gen_code(sql: &ParsedSQL) -> Vec<OpCode> {
             for op in operands {
                 translate_operand_to_code(&mut op_codes, &op);
 
-                let store_code = store_code_for_type(type_of(&op));
+                let store_code = store_code_for_type(type_of(&op, schema).unwrap());
                 op_codes.push(store_code);
             }
 
@@ -68,21 +59,21 @@ fn store_code_for_type(sql_type: SQLType) -> OpCode {
 }
 
 /// type inference for the operand
-fn type_of(op: &Operand) -> SQLType {
+fn type_of(op: &Operand, schema: &Schema) -> Option<SQLType> {
     match op {
-        &Operand::Integer(_) => SQLType::Integer,
+        &Operand::Integer(_) => Some(SQLType::Integer),
         &Operand::Add(ref op1, ref op2) => {
-            let type_op1 = type_of(op1);
-            if type_op1 == type_of(op2) {
+            let type_op1 = type_of(op1, schema);
+            if type_op1 == type_of(op2, schema) {
                 type_op1
             } else {
                 // TODO: cast
-                type_op1
+                None
             }
         }
-        &Operand::Parentheses(ref op) => type_of(op),
-        &Operand::String(ref str) => SQLType::String,
-        &Operand::Column(ref column) => panic!("not implemented"),
+        &Operand::Parentheses(ref op) => type_of(op, schema),
+        &Operand::String(ref str) => Some(SQLType::String),
+        &Operand::Column(ref column) => schema.get_column_type(column),
     }
 }
 
@@ -105,6 +96,10 @@ fn translate_operand_to_code(op_codes: &mut Vec<OpCode>, op: &Operand) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_schema() -> Schema {
+        Schema::new()
+    }
 
     #[test]
     fn gen_codes_for_a_single_load() {
@@ -136,19 +131,21 @@ mod tests {
 
     #[test]
     fn type_inference_for_constants_done_right() {
+        let schema = get_schema();
         // 3 + (4 + 5)
         let add_op = Operand::Add(Box::new(Operand::Integer(4)), Box::new(Operand::Integer(5)));
         let nested_add_op = Operand::Add(Box::new(Operand::Integer(3)), Box::new(add_op));
-        assert_eq!(type_of(&nested_add_op), SQLType::Integer);
+        assert_eq!(type_of(&nested_add_op, &schema), Some(SQLType::Integer));
     }
 
     #[test]
     fn gen_codes_for_the_simplest_select_statement() {
+        let schema = get_schema();
         let sql = ParsedSQL::Select {
             table: None,
             operands: vec![Operand::Integer(42)],
         };
-        let op_codes = gen_code(&sql);
+        let op_codes = gen_code(&sql, &schema);
 
         let expected = vec![OpCode::LoadInt(42), OpCode::StoreInt, OpCode::FlushRow];
         assert_eq!(op_codes, expected);
@@ -156,11 +153,12 @@ mod tests {
 
     #[test]
     fn gen_codes_for_select_string_literal() {
+        let schema = get_schema();
         let sql = ParsedSQL::Select {
             table: None,
             operands: vec![Operand::String("foo, bar".to_owned())],
         };
-        let op_codes = gen_code(&sql);
+        let op_codes = gen_code(&sql, &schema);
 
         let expected = vec![
             OpCode::LoadStr("foo, bar".to_owned()),
